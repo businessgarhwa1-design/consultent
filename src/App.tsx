@@ -105,6 +105,16 @@ export default function App() {
     CloudService.initDatabase();
     SupabaseService.testConnection().catch(() => {});
 
+    // Subscribe to Supabase Realtime changes
+    const unsubSupabase = SupabaseService.initRealtimeSubscription(() => {
+      const freshVisits = GSTStorage.getOfficeVisits();
+      const freshClients = GSTStorage.getClients();
+      const freshWork = GSTStorage.getMonthlyWork();
+      setOfficeVisits(freshVisits);
+      setClients(freshClients);
+      setMonthlyWork(freshWork);
+    });
+
     // Subscribe to cross-device sync
     const unsubscribe = subscribeToDatabase(() => {
       const cloudU = CloudService.getCachedUsers();
@@ -143,6 +153,7 @@ export default function App() {
 
     return () => {
       unsubscribe();
+      unsubSupabase();
     };
   }, []);
 
@@ -512,9 +523,27 @@ export default function App() {
     }
   };
 
-  const handleRefreshPortal = () => {
+  const handleRefreshPortal = async () => {
     setIsRefreshingPortal(true);
     try {
+      // Check & pull any remote changes from Supabase if available
+      try {
+        const remoteRes = await SupabaseService.fetchAllProjectDataFromSupabase();
+        if (remoteRes.success && remoteRes.data) {
+          if (remoteRes.data.clients && Array.isArray(remoteRes.data.clients) && remoteRes.data.clients.length > 0) {
+            GSTStorage.saveClients(remoteRes.data.clients);
+          }
+          if (remoteRes.data.monthly_work && Array.isArray(remoteRes.data.monthly_work) && remoteRes.data.monthly_work.length > 0) {
+            GSTStorage.saveMonthlyWork(remoteRes.data.monthly_work);
+          }
+          if (remoteRes.data.office_visits && Array.isArray(remoteRes.data.office_visits) && remoteRes.data.office_visits.length > 0) {
+            GSTStorage.saveOfficeVisits(remoteRes.data.office_visits);
+          }
+        }
+      } catch (cloudErr) {
+        console.warn('Supabase fetch during refresh notice:', cloudErr);
+      }
+
       const freshVisits = GSTStorage.getOfficeVisits();
       const freshClients = GSTStorage.getClients();
       const freshWork = GSTStorage.getMonthlyWork();
@@ -531,7 +560,7 @@ export default function App() {
       setActivityLogs(freshLogs);
       if (freshSettings) setSettings(freshSettings);
 
-      showToast(`Portal data refreshed for FY ${selectedFY.display_name} (${selectedMonth})`, 'info');
+      showToast(`Portal data & Supabase Cloud synced for FY ${selectedFY.display_name} (${selectedMonth})`, 'info');
     } catch (err) {
       console.error('Refresh error:', err);
       showToast('Portal refreshed!', 'info');

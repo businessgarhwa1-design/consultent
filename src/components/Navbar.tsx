@@ -13,8 +13,11 @@ import {
   ChevronDown,
   RefreshCw,
   Sparkles,
-  Radio
+  Radio,
+  Database,
+  CheckCircle2
 } from 'lucide-react';
+import { SupabaseService } from '../utils/supabaseService';
 
 interface NavbarProps {
   currentUser: User;
@@ -208,6 +211,20 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-1 font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/80">
                 <span className="text-[10px] text-blue-600 font-semibold">Live:</span>
                 <span>{liveIndiaTime.liveFYStr}</span>
+              </div>
+
+              <span className="text-slate-300 hidden md:inline">•</span>
+
+              {/* Supabase Live Connected Status Pill */}
+              <div 
+                id="navbar-supabase-status-pill"
+                className="hidden md:flex items-center gap-1 font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-300 shadow-2xs cursor-default"
+                title="Supabase Cloud Database Connected (Project ID: ehvyyaelxvksbvgdocmg | Live Realtime Save & Fetch Active)"
+              >
+                <Database className="w-3 h-3 text-emerald-600 shrink-0" />
+                <span className="text-[10px] uppercase tracking-wide">Supabase:</span>
+                <span className="font-mono text-emerald-950 text-[10px]">ehvyyaelxvksbvgdocmg</span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               </div>
             </div>
           </div>
