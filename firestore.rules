@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for security validation
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Portal Users collection - Read/Write allowed for portal operation
+    match /portal_users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Password reset tokens - Public write for request/validation/reset, protected by secure token_hash
+    match /portal_password_resets/{tokenId} {
+      allow read, create, update: if true;
+      allow delete: if false;
+    }
+
+    // Master Clients collection
+    match /portal_clients/{clientId} {
+      allow read, write: if true;
+    }
+
+    // Monthly Work Pipeline
+    match /portal_monthly_work/{workId} {
+      allow read, write: if true;
+    }
+
+    // GST Turnover Records
+    match /portal_gst_turnover/{turnoverId} {
+      allow read, write: if true;
+    }
+
+    // Client Bank Accounts
+    match /portal_bank_accounts/{accountId} {
+      allow read, write: if true;
+    }
+
+    // Bank Turnover Records
+    match /portal_bank_turnover/{turnoverId} {
+      allow read, write: if true;
+    }
+
+    // Office Reception Visits
+    match /portal_office_visits/{visitId} {
+      allow read, write: if true;
+    }
+
+    // Activity Logs & Audit Trails
+    match /portal_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    // System Settings & Seed config
+    match /portal_settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Default fallback
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

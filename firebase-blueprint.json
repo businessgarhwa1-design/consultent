@@ -1,0 +1,174 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "CA firm user, administrator, or staff member",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique user timestamp id" },
+        "name": { "type": "string", "description": "Full name" },
+        "email": { "type": "string", "format": "email", "description": "Email address" },
+        "mobile": { "type": "string", "description": "Mobile contact number" },
+        "username": { "type": "string", "description": "Login username" },
+        "password_hash": { "type": "string", "description": "Encrypted PBKDF2 password hash" },
+        "role": { "type": "string", "enum": ["admin", "staff", "client", "guest"], "description": "Access control role" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Account status" },
+        "created_at": { "type": "string", "description": "Account creation timestamp (IST)" },
+        "updated_at": { "type": "string", "description": "Last update timestamp (IST)" },
+        "last_login": { "type": "string", "description": "Last login timestamp (IST)" }
+      },
+      "required": ["id", "name", "username", "role", "status"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Master GST client profile with filing scheme and contact details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique client ID" },
+        "file_no": { "type": "string", "description": "Office file / physical folder number" },
+        "firm_name": { "type": "string", "description": "Trade / entity name" },
+        "client_name": { "type": "string", "description": "Proprietor / partner / director name" },
+        "mobile": { "type": "string", "description": "Primary mobile number" },
+        "email": { "type": "string", "format": "email", "description": "Official email address" },
+        "gstin": { "type": "string", "description": "15-digit GSTIN" },
+        "scheme": { "type": "string", "enum": ["Normal", "Composition", "QRMP"], "description": "GST filing scheme" },
+        "assigned_staff_id": { "type": "number", "description": "Assigned staff member ID" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Client active state" }
+      },
+      "required": ["id", "firm_name", "scheme", "status"]
+    },
+    "MonthlyWork": {
+      "title": "MonthlyWork",
+      "description": "Monthly GST compliance pipeline record (GSTR-1, GSTR-3B, Tax, Document collection)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Record ID" },
+        "client_id": { "type": "number", "description": "Reference to Client ID" },
+        "fy_id": { "type": "number", "description": "Financial Year ID" },
+        "month": { "type": "string", "description": "Compliance month e.g. APR, MAY, JUN..." },
+        "status": { "type": "string", "description": "Overall status: Pending, Docs Collected, Working, Filed, etc." },
+        "gstr1_status": { "type": "string", "description": "GSTR-1 status" },
+        "gstr3b_status": { "type": "string", "description": "GSTR-3B status" },
+        "tax_payment_status": { "type": "string", "description": "Tax Payment status" },
+        "data_status": { "type": "string", "description": "Document Collection status" }
+      },
+      "required": ["id", "client_id", "fy_id", "month", "status"]
+    },
+    "ClientGstTurnover": {
+      "title": "ClientGstTurnover",
+      "description": "12-month GST turnover record with taxable, exempt, and total turnover per client",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique turnover ID" },
+        "client_id": { "type": "number", "description": "Client ID reference" },
+        "fy_id": { "type": "number", "description": "Financial Year ID" },
+        "months": { "type": "object", "description": "Month-by-month taxable and exempt turnover map" },
+        "annual_taxable_turnover": { "type": "number", "description": "Annual taxable sales" },
+        "annual_exempt_turnover": { "type": "number", "description": "Annual exempt sales" },
+        "annual_total_turnover": { "type": "number", "description": "Total GST turnover" }
+      },
+      "required": ["id", "client_id", "fy_id"]
+    },
+    "ClientBankAccount": {
+      "title": "ClientBankAccount",
+      "description": "Up to 5 registered bank accounts per client for turnover tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique bank account ID" },
+        "client_id": { "type": "number", "description": "Client ID reference" },
+        "slot": { "type": "number", "description": "Bank Account slot 1 to 5" },
+        "bank_name": { "type": "string", "description": "Bank Name" },
+        "account_number": { "type": "string", "description": "Account number" },
+        "ifsc_code": { "type": "string", "description": "IFSC code" },
+        "account_type": { "type": "string", "description": "Current, Savings, OD, CC" }
+      },
+      "required": ["id", "client_id", "slot"]
+    },
+    "ClientBankTurnover": {
+      "title": "ClientBankTurnover",
+      "description": "Monthly credits and debits per bank account slot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique record ID" },
+        "client_id": { "type": "number", "description": "Client ID" },
+        "fy_id": { "type": "number", "description": "Financial Year ID" },
+        "slot": { "type": "number", "description": "Slot 1 to 5" },
+        "monthly_credits": { "type": "object", "description": "Monthly credit values" },
+        "annual_credit_turnover": { "type": "number", "description": "Total bank turnover" }
+      },
+      "required": ["id", "client_id", "fy_id", "slot"]
+    },
+    "OfficeVisit": {
+      "title": "OfficeVisit",
+      "description": "Reception visitor log, office visit registration, purpose, and staff attending",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Unique visit ID" },
+        "visitor_type": { "type": "string", "description": "client or other_visitor" },
+        "client_id": { "type": "number", "description": "Linked client ID if client" },
+        "visitor_name": { "type": "string", "description": "Name of visitor" },
+        "firm_name": { "type": "string", "description": "Firm name" },
+        "mobile": { "type": "string", "description": "Phone number" },
+        "purpose": { "type": "string", "description": "Purpose of visit" },
+        "attending_staff_id": { "type": "number", "description": "Staff ID assigned" },
+        "visit_date": { "type": "string", "description": "Date of visit (YYYY-MM-DD)" },
+        "in_time": { "type": "string", "description": "Entry time (HH:MM)" },
+        "out_time": { "type": "string", "description": "Exit time (HH:MM)" },
+        "status": { "type": "string", "description": "waiting, in_progress, completed, cancelled" }
+      },
+      "required": ["id", "visitor_type", "visitor_name", "visit_date", "in_time", "status"]
+    },
+    "PasswordResetToken": {
+      "title": "PasswordResetToken",
+      "description": "Single-use 30-minute password reset token with Google identity verification state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Token document ID" },
+        "user_id": { "type": "number", "description": "Linked user account ID" },
+        "email": { "type": "string", "format": "email", "description": "Registered Gmail/email address" },
+        "token_hash": { "type": "string", "description": "SHA-256 hash of secret random reset token" },
+        "expires_at": { "type": "number", "description": "Expiry timestamp (ms)" },
+        "used_at": { "type": "string", "description": "IST timestamp when password reset completed" },
+        "created_at": { "type": "string", "description": "Creation timestamp" },
+        "google_verified": { "type": "boolean", "description": "Whether Google authentication verified email ownership" },
+        "google_email": { "type": "string", "description": "Verified Google email" },
+        "google_subject_id": { "type": "string", "description": "Google UID/subject ID" }
+      },
+      "required": ["id", "user_id", "email", "token_hash", "expires_at", "created_at"]
+    }
+  },
+  "firestore": {
+    "/portal_users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "System users, staff members, and administrators"
+    },
+    "/portal_clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Master client list with GST filing information"
+    },
+    "/portal_monthly_work/{workId}": {
+      "schema": { "$ref": "#/entities/MonthlyWork" },
+      "description": "Monthly work tracking records per client and financial year"
+    },
+    "/portal_gst_turnover/{turnoverId}": {
+      "schema": { "$ref": "#/entities/ClientGstTurnover" },
+      "description": "12-month taxable and exempt turnover data per client"
+    },
+    "/portal_bank_accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/ClientBankAccount" },
+      "description": "5 Bank Account profiles per client"
+    },
+    "/portal_bank_turnover/{turnoverId}": {
+      "schema": { "$ref": "#/entities/ClientBankTurnover" },
+      "description": "12-month bank turnover records per slot"
+    },
+    "/portal_office_visits/{visitId}": {
+      "schema": { "$ref": "#/entities/OfficeVisit" },
+      "description": "Office reception log register"
+    },
+    "/portal_password_resets/{tokenId}": {
+      "schema": { "$ref": "#/entities/PasswordResetToken" },
+      "description": "Password reset token requests and Google identity verification logs"
+    }
+  }
+}
