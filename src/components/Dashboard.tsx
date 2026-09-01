@@ -14,7 +14,6 @@ import {
 } from '../types';
 import { GSTStorage } from '../utils/storage';
 import { generateTopClientsTurnoverPDF, TopClientExportRow } from '../utils/pdfGenerator';
-import { SupabaseService, SupabaseSyncStatus } from '../utils/supabaseService';
 import {
   Users,
   CheckCircle2,
@@ -77,8 +76,6 @@ import {
   ArrowUp,
   ArrowDown,
   Filter,
-  Database,
-  Cloud,
 } from 'lucide-react';
 import {
   PieChart,
@@ -175,116 +172,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [turnoverStatusFilter, setTurnoverStatusFilter] = useState<'active' | 'all' | 'inactive'>('active');
   const [turnoverSearchTerm, setTurnoverSearchTerm] = useState('');
   const [copiedTurnoverTooltip, setCopiedTurnoverTooltip] = useState(false);
-
-  // Supabase Cloud State
-  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseSyncStatus>(SupabaseService.getStatus());
-  const [isTestingSupabase, setIsTestingSupabase] = useState(false);
-  const [isPushingSupabase, setIsPushingSupabase] = useState(false);
-  const [isPullingSupabase, setIsPullingSupabase] = useState(false);
-  const [supabaseAlert, setSupabaseAlert] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  useEffect(() => {
-    setSupabaseStatus(SupabaseService.getStatus());
-  }, []);
-
-  const handleTestSupabaseConnection = async () => {
-    setIsTestingSupabase(true);
-    setSupabaseAlert(null);
-    try {
-      const res = await SupabaseService.testConnection();
-      setSupabaseStatus(SupabaseService.getStatus());
-      if (res.success) {
-        setSupabaseAlert({
-          type: 'success',
-          message: `✅ Supabase Database Connected Successfully! Project ID: ehvyyaelxvksbvgdocmg | Live Realtime Save & Fetch Active (${res.message})`,
-        });
-      } else {
-        setSupabaseAlert({
-          type: 'error',
-          message: `⚠️ Supabase Check: ${res.message}`,
-        });
-      }
-    } catch (err: any) {
-      setSupabaseAlert({
-        type: 'error',
-        message: `⚠️ Connection test notice: ${err?.message || 'Error communicating with Supabase'}`,
-      });
-    } finally {
-      setIsTestingSupabase(false);
-      setTimeout(() => {
-        setSupabaseAlert(null);
-      }, 7000);
-    }
-  };
-
-  const handlePushAllToSupabase = async () => {
-    setIsPushingSupabase(true);
-    setSupabaseAlert(null);
-    try {
-      const res = await SupabaseService.syncAllProjectDataToSupabase();
-      setSupabaseStatus(SupabaseService.getStatus());
-      if (res.success) {
-        setSupabaseAlert({
-          type: 'success',
-          message: `✅ All ${clients.length} Clients, ${monthlyWork.length} Compliance records, ${officeVisits.length} Visits & Firm details successfully saved and synced to Supabase Cloud DB!`,
-        });
-      } else {
-        setSupabaseAlert({
-          type: 'error',
-          message: `⚠️ Sync Notice: ${res.message}`,
-        });
-      }
-    } catch (err: any) {
-      setSupabaseAlert({
-        type: 'error',
-        message: `⚠️ Sync Error: ${err?.message || 'Failed to save to Supabase'}`,
-      });
-    } finally {
-      setIsPushingSupabase(false);
-      setTimeout(() => {
-        setSupabaseAlert(null);
-      }, 8000);
-    }
-  };
-
-  const handlePullFromSupabase = async () => {
-    setIsPullingSupabase(true);
-    setSupabaseAlert(null);
-    try {
-      const res = await SupabaseService.fetchAllProjectDataFromSupabase();
-      if (res.success && res.data) {
-        if (res.data.clients && Array.isArray(res.data.clients) && res.data.clients.length > 0) {
-          GSTStorage.saveClients(res.data.clients);
-        }
-        if (res.data.monthly_work && Array.isArray(res.data.monthly_work) && res.data.monthly_work.length > 0) {
-          GSTStorage.saveMonthlyWork(res.data.monthly_work);
-        }
-        if (res.data.office_visits && Array.isArray(res.data.office_visits) && res.data.office_visits.length > 0) {
-          GSTStorage.saveOfficeVisits(res.data.office_visits);
-        }
-        if (onRefresh) onRefresh();
-        setSupabaseAlert({
-          type: 'success',
-          message: `✅ Supabase Cloud Data successfully fetched and synchronized into local workspace!`,
-        });
-      } else {
-        setSupabaseAlert({
-          type: 'info',
-          message: `ℹ️ Supabase fetched: ${res.message}`,
-        });
-      }
-    } catch (err: any) {
-      setSupabaseAlert({
-        type: 'error',
-        message: `⚠️ Fetch error: ${err?.message || 'Failed to fetch from Supabase'}`,
-      });
-    } finally {
-      setIsPullingSupabase(false);
-      setTimeout(() => {
-        setSupabaseAlert(null);
-      }, 7000);
-    }
-  };
 
   const handleRefreshClick = () => {
     setIsRefreshing(true);
@@ -400,7 +287,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch {
       return [];
     }
-  }, []);
+  }, [selectedFY.id, selectedMonth, clients, monthlyWork, isRefreshing]);
 
   const fyGstTurnovers = useMemo(
     () => allGstTurnovers.filter((t) => t.financial_year_id === selectedFY.id),
@@ -418,6 +305,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   );
 
   const annualGrandGstTurnover = annualTaxableTotal + annualExemptTotal;
+
+  // Selected Month GST Turnover
+  const selectedMonthGstTurnovers = useMemo(
+    () => fyGstTurnovers.filter((t) => t.month === selectedMonth),
+    [fyGstTurnovers, selectedMonth]
+  );
+  const selectedMonthGstTotal = useMemo(
+    () =>
+      selectedMonthGstTurnovers.reduce(
+        (sum, t) => sum + (Number(t.taxable_turnover) || 0) + (Number(t.exempt_turnover) || 0),
+        0
+      ),
+    [selectedMonthGstTurnovers]
+  );
 
   // Monthly Turnover Trajectory (April - March)
   const monthlyGstSalesChart = useMemo(() => {
@@ -443,7 +344,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch {
       return [];
     }
-  }, []);
+  }, [clients, isRefreshing]);
 
   const bankTurnovers: ClientBankTurnover[] = useMemo(() => {
     try {
@@ -451,7 +352,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     } catch {
       return [];
     }
-  }, []);
+  }, [selectedFY.id, selectedMonth, clients, isRefreshing]);
 
   const fyBankTurnovers = useMemo(
     () => bankTurnovers.filter((b) => b.financial_year_id === selectedFY.id),
@@ -461,6 +362,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const annualBankTotal = useMemo(
     () => fyBankTurnovers.reduce((sum, b) => sum + (Number(b.turnover_amount) || 0), 0),
     [fyBankTurnovers]
+  );
+
+  // Selected Month Bank Turnover
+  const selectedMonthBankTurnovers = useMemo(
+    () => fyBankTurnovers.filter((b) => b.month === selectedMonth),
+    [fyBankTurnovers, selectedMonth]
+  );
+  const selectedMonthBankTotal = useMemo(
+    () =>
+      selectedMonthBankTurnovers.reduce(
+        (sum, b) => sum + (Number(b.turnover_amount) || 0),
+        0
+      ),
+    [selectedMonthBankTurnovers]
   );
 
   // Base raw list of all clients with GST & Bank Turnover for selected FY
@@ -1102,107 +1017,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         )}
       </div>
 
-      {/* 2.5 SUPABASE CLOUD DATABASE LIVE STATUS & CONTROL STRIP */}
-      <div 
-        id="dashboard-supabase-live-card"
-        className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-4 sm:p-5 border border-slate-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4"
-      >
-        <div className="flex items-start sm:items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5 sm:mt-0">
-            <Database className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center flex-wrap gap-2">
-              <span className="font-black text-sm text-white tracking-wide">Supabase Cloud Database</span>
-              <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                CONNECTED & LIVE
-              </span>
-              <span className="text-[11px] font-mono text-slate-400 bg-slate-800/90 px-2 py-0.5 rounded border border-slate-700">
-                ID: ehvyyaelxvksbvgdocmg
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-1">
-              Real-time synchronization for Clients ({clients.length}), Monthly Work ({monthlyWork.length}), Bank Accounts ({clients.length * 5} slots), and Reception Visits ({officeVisits.length}).
-            </p>
-          </div>
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            id="btn-test-supabase-connection"
-            onClick={handleTestSupabaseConnection}
-            disabled={isTestingSupabase}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold border border-slate-700 transition-all cursor-pointer shadow-xs active:scale-95"
-            title="Test real-time connection with Supabase Cloud DB"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? 'animate-spin text-emerald-400' : 'text-slate-300'}`} />
-            <span>{isTestingSupabase ? 'Testing...' : 'Test Connection'}</span>
-          </button>
-
-          <button
-            id="btn-push-all-supabase-dashboard"
-            onClick={handlePushAllToSupabase}
-            disabled={isPushingSupabase}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer active:scale-95"
-            title="Save and push full application state to Supabase Cloud"
-          >
-            <Cloud className={`w-3.5 h-3.5 ${isPushingSupabase ? 'animate-spin' : ''}`} />
-            <span>{isPushingSupabase ? 'Saving Data...' : 'Save to Supabase'}</span>
-          </button>
-
-          <button
-            id="btn-pull-supabase-dashboard"
-            onClick={handlePullFromSupabase}
-            disabled={isPullingSupabase}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-600/80 hover:bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer active:scale-95"
-            title="Fetch latest remote records from Supabase"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isPullingSupabase ? 'animate-spin' : ''}`} />
-            <span>{isPullingSupabase ? 'Fetching...' : 'Fetch from Cloud'}</span>
-          </button>
-
-          <button
-            onClick={() => onNavigateTab('settings')}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 text-xs transition-colors cursor-pointer"
-            title="Open Supabase SQL Schema & Consultant Settings"
-          >
-            <UserCog className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Supabase Notification Alert Banner if triggered */}
-      {supabaseAlert && (
-        <div
-          className={`p-3.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 transition-all animate-fadeIn ${
-            supabaseAlert.type === 'success'
-              ? 'bg-emerald-50 text-emerald-950 border border-emerald-300'
-              : supabaseAlert.type === 'error'
-              ? 'bg-rose-50 text-rose-950 border border-rose-300'
-              : 'bg-blue-50 text-blue-950 border border-blue-300'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {supabaseAlert.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : supabaseAlert.type === 'error' ? (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            ) : (
-              <Cloud className="w-4 h-4 text-blue-600 shrink-0" />
-            )}
-            <span>{supabaseAlert.message}</span>
-          </div>
-          <button
-            onClick={() => setSupabaseAlert(null)}
-            className="text-slate-400 hover:text-slate-700 text-xs font-bold px-2 py-0.5"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
       {/* 3. EXECUTIVE 7-PILLAR KPI METRIC RIBBON */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         {/* Metric 1: Total Master Clients */}
@@ -1302,8 +1116,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {formatINR(annualGrandGstTurnover)}
             </div>
           </div>
-          <div className="text-[10px] text-[#78350F]/80 font-bold mt-2 pt-2 border-t border-[#D4C3A3]/60 truncate">
-            12M Taxable + Exempt
+          <div className="text-[10px] text-[#78350F] font-bold mt-2 pt-2 border-t border-[#D4C3A3]/60 flex items-center justify-between truncate">
+            <span>{selectedMonth.slice(0, 3)}: {formatINR(selectedMonthGstTotal)}</span>
+            <span className="text-[9px] text-[#78350F]/70 uppercase">FY Total</span>
           </div>
         </div>
 
@@ -1322,8 +1137,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {formatINR(annualBankTotal)}
             </div>
           </div>
-          <div className="text-[10px] text-indigo-700 font-bold mt-2 pt-2 border-t border-indigo-200/60 truncate">
-            {bankAccounts.length} Active Accounts
+          <div className="text-[10px] text-indigo-700 font-bold mt-2 pt-2 border-t border-indigo-200/60 flex items-center justify-between truncate">
+            <span>{selectedMonth.slice(0, 3)}: {formatINR(selectedMonthBankTotal)}</span>
+            <span>{bankAccounts.length} A/C</span>
           </div>
         </div>
 

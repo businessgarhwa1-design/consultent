@@ -488,6 +488,7 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
         exemptNum
       );
       loadGstTurnover();
+      if (onRefresh) onRefresh();
     }
   };
 
@@ -501,6 +502,8 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
 
     // 2. Save Taxable and Exempt turnover figures
     saveClientTurnover(clientId);
+
+    if (onRefresh) onRefresh();
 
     setSavedRowIds((prev) => ({ ...prev, [clientId]: true }));
     setTimeout(() => {
@@ -544,6 +547,7 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
           monthlyWork={monthlyWork}
           onSaved={() => {
             loadGstTurnover();
+            if (onRefresh) onRefresh();
           }}
         />
       )}

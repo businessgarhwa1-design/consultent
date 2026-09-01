@@ -215,6 +215,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     setSaveStatus(`Saved turnover for Slot #${account.slot_number} (${account.bank_name})!`);
     setTimeout(() => setSaveStatus(null), 3500);
     loadData();
+    if (onRefresh) onRefresh();
   };
 
   // Save all accounts at once
@@ -236,6 +237,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     setSaveStatus(`All ${bankAccounts.length} Bank Account(s) saved successfully for FY ${selectedFY.display_name}!`);
     setTimeout(() => setSaveStatus(null), 4000);
     loadData();
+    if (onRefresh) onRefresh();
   };
 
   // Open slot editor
@@ -288,6 +290,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     setSaveStatus(`Bank Account Slot #${slotForm.slot_number} configured successfully.`);
     setTimeout(() => setSaveStatus(null), 3000);
     loadData();
+    if (onRefresh) onRefresh();
   };
 
   // Delete slot account
@@ -299,6 +302,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     ) {
       GSTStorage.deleteClientBankAccount(accountId);
       loadData();
+      if (onRefresh) onRefresh();
     }
   };
 
@@ -356,6 +360,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
       setSaveStatus(`Statement backup (${file.name}) uploaded for Slot #${account.slot_number}!`);
       setTimeout(() => setSaveStatus(null), 3500);
       loadData();
+      if (onRefresh) onRefresh();
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -380,6 +385,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     if (window.confirm(`Delete the statement backup file for Slot #${slotNum}?`)) {
       GSTStorage.deleteBankStatementBackup(backupId);
       loadData();
+      if (onRefresh) onRefresh();
     }
   };
 
