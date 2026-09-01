@@ -104,13 +104,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setSuccessBanner('Password updated successfully! You can now click Login.');
   };
 
-  const fillDemoAccount = (user: string, pass: string) => {
-    setIdentifier(user);
-    setPassword(pass);
-    setErrorMessage('');
-    setSuccessBanner('');
-  };
-
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8 font-sans selection:bg-blue-600 selection:text-white">
       {/* Background decoration */}
@@ -264,52 +257,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Credentials Helper */}
-          <div className="mt-6 pt-5 border-t border-slate-700/60">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-              <span>Quick Login Accounts:</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                id="demo-admin-login-btn"
-                onClick={() => fillDemoAccount('admin', 'admin')}
-                className="text-left p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-700/60 border border-slate-700/80 transition-all group cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-purple-300">Admin Account</span>
-                  <span className="text-[9px] bg-purple-900/60 text-purple-300 px-1.5 py-0.5 rounded font-mono">Full</span>
-                </div>
-                <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  admin / admin
-                </div>
-              </button>
-
-              <button
-                type="button"
-                id="demo-staff-login-btn"
-                onClick={() => fillDemoAccount('rahul', 'Password@123')}
-                className="text-left p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-700/60 border border-slate-700/80 transition-all group cursor-pointer"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-blue-300">Staff / User</span>
-                  <span className="text-[9px] bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded font-mono">User</span>
-                </div>
-                <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                  rahul / Password@123
-                </div>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Footer info */}
         <div className="mt-6 text-center text-xs text-slate-400 space-y-1">
-          <p>Protected by Cloud Firestore & Google Identity Verification</p>
-          <p className="text-slate-400 text-[11px]">Direct private URL access without session is strictly redirected to this Login Page.</p>
+          <p>Protected by Enterprise Cloud Firestore & Multi-Device Realtime Sync</p>
+          <p className="text-slate-400 text-[11px]">Authorized personnel login only. Sessions are securely encrypted.</p>
         </div>
       </div>
 

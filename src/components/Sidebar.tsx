@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { User } from '../types';
+import { User, TabType } from '../types';
+export type { TabType };
 import {
   LayoutDashboard,
   Users,
@@ -22,22 +23,6 @@ import {
   ChevronRight,
   Table,
 } from 'lucide-react';
-
-export type TabType =
-  | 'dashboard'
-  | 'clients'
-  | 'office-visits'
-  | 'monthly-work'
-  | 'gst-turnover-entry'
-  | 'gst-turnover-matrix'
-  | 'bank-turnover'
-  | 'reports'
-  | 'financial-years'
-  | 'users'
-  | 'activity-logs'
-  | 'import'
-  | 'export'
-  | 'settings';
 
 interface SidebarProps {
   activeTab: TabType;

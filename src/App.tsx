@@ -36,22 +36,27 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, AlertCircle, Info, ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export default function App() {
-  // Global State
-  const [users, setUsers] = useState<User[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [financialYears, setFinancialYears] = useState<FinancialYear[]>([]);
-  const [selectedFY, setSelectedFY] = useState<FinancialYear | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState<string>('August');
-  const [monthlyWork, setMonthlyWork] = useState<MonthlyWorkType[]>([]);
-  const [workHistory, setWorkHistory] = useState<WorkHistory[]>([]);
-  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [officeVisits, setOfficeVisits] = useState<OfficeVisit[]>([]);
+  // Global State - Direct synchronous initialization from local storage for instant reload recovery
+  const [users, setUsers] = useState<User[]>(() => GSTStorage.getUsers());
+  const [currentUser, setCurrentUser] = useState<User | null>(() => GSTStorage.getCurrentUser());
+  const [clients, setClients] = useState<Client[]>(() => GSTStorage.getClients());
+  const [financialYears, setFinancialYears] = useState<FinancialYear[]>(() => GSTStorage.getFinancialYears());
+  const [selectedFY, setSelectedFY] = useState<FinancialYear | null>(() => GSTStorage.getSelectedFY());
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => GSTStorage.getSelectedMonth());
+  const [monthlyWork, setMonthlyWork] = useState<MonthlyWorkType[]>(() => GSTStorage.getMonthlyWork());
+  const [workHistory, setWorkHistory] = useState<WorkHistory[]>(() => GSTStorage.getWorkHistory());
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>(() => GSTStorage.getActivityLogs());
+  const [settings, setSettings] = useState<AppSettings | null>(() => GSTStorage.getSettings());
+  const [officeVisits, setOfficeVisits] = useState<OfficeVisit[]>(() => GSTStorage.getOfficeVisits());
 
-  // UI State
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard');
+  // UI State with persisted active tab
+  const [activeTab, setActiveTabState] = useState<TabType>(() => GSTStorage.getActiveTab());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const setActiveTab = (tab: TabType) => {
+    setActiveTabState(tab);
+    GSTStorage.setActiveTab(tab);
+  };
 
   // Modals
   const [isAddClientModalOpen, setIsAddClientModalOpen] = useState(false);
@@ -98,7 +103,9 @@ export default function App() {
     setWorkHistory(loadedHistory);
     setActivityLogs(loadedLogs);
     setSettings(loadedSettings);
-    setCurrentUser(loadedCurUser);
+    if (loadedCurUser) {
+      setCurrentUser(loadedCurUser);
+    }
     setOfficeVisits(loadedVisits);
 
     // Initialize Cloud Connection & Sync with Supabase
@@ -176,6 +183,8 @@ export default function App() {
 
   // Handlers for Login & Session
   const handleLoginSuccess = (user: User) => {
+    GSTStorage.setCurrentUser(user);
+    GSTStorage.startSession(user);
     setCurrentUser(user);
     setActiveTab('dashboard');
     showToast(`Welcome back, ${user.name}! (${user.role.toUpperCase()})`, 'success');
@@ -184,6 +193,7 @@ export default function App() {
   const handleLogout = () => {
     GSTStorage.logout();
     setCurrentUser(null);
+    setActiveTab('dashboard');
     showToast('You have been logged out securely.', 'info');
   };
 

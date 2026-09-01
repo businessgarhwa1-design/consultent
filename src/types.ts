@@ -450,4 +450,21 @@ export const VISIT_PURPOSES = [
   'Other Office Service',
 ] as const;
 
+export type TabType =
+  | 'dashboard'
+  | 'clients'
+  | 'office-visits'
+  | 'monthly-work'
+  | 'gst-turnover-entry'
+  | 'gst-turnover-matrix'
+  | 'bank-turnover'
+  | 'reports'
+  | 'financial-years'
+  | 'users'
+  | 'activity-logs'
+  | 'import'
+  | 'export'
+  | 'settings';
+
+
 

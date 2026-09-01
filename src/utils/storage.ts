@@ -20,6 +20,7 @@ import {
   OfficeVisitStatus,
   VisitorType,
   PasswordResetToken,
+  TabType,
 } from '../types';
 import {
   initialActivityLogs,
@@ -88,6 +89,8 @@ const STORAGE_KEYS = {
   ACTIVITY_LOGS: 'gst_app_activity_logs_v1',
   SETTINGS: 'gst_app_settings_v1',
   CURRENT_USER_ID: 'gst_app_current_user_id',
+  CURRENT_USER_DATA: 'gst_app_current_user_data_v1',
+  ACTIVE_TAB: 'gst_app_active_tab_v1',
   SELECTED_FY_ID: 'gst_app_selected_fy_id',
   SELECTED_MONTH: 'gst_app_selected_month',
   BANK_ACCOUNTS: 'gst_app_bank_accounts_v1',
@@ -415,18 +418,48 @@ export class GSTStorage {
   }
 
   static getCurrentUser(): User | null {
+    // 1. Direct cached user object for instant recovery on page reload
+    const rawUserData = safeGetItem(STORAGE_KEYS.CURRENT_USER_DATA);
+    if (rawUserData) {
+      try {
+        const parsed = JSON.parse(rawUserData);
+        if (parsed && typeof parsed === 'object' && parsed.id && parsed.name) {
+          return parsed;
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 2. Lookup by stored user ID
     const storedId = safeGetItem(STORAGE_KEYS.CURRENT_USER_ID);
     if (!storedId) return null;
     const users = this.getUsers();
     const found = users.find((u) => u.id === Number(storedId));
-    return found || null;
+    if (found) {
+      safeSetItem(STORAGE_KEYS.CURRENT_USER_DATA, JSON.stringify(found));
+      return found;
+    }
+    return null;
   }
 
   static setCurrentUser(user: User | null) {
     if (user) {
       safeSetItem(STORAGE_KEYS.CURRENT_USER_ID, String(user.id));
+      safeSetItem(STORAGE_KEYS.CURRENT_USER_DATA, JSON.stringify(user));
+      // Ensure user is present in local users collection
+      const users = this.getUsers();
+      const idx = users.findIndex((u) => u.id === user.id);
+      if (idx === -1) {
+        users.push(user);
+        this.saveUsers(users);
+      } else {
+        users[idx] = { ...users[idx], ...user };
+        this.saveUsers(users);
+      }
     } else {
       safeRemoveItem(STORAGE_KEYS.CURRENT_USER_ID);
+      safeRemoveItem(STORAGE_KEYS.CURRENT_USER_DATA);
     }
   }
 
@@ -858,6 +891,34 @@ export class GSTStorage {
 
   static setSelectedMonth(month: string) {
     safeSetItem(STORAGE_KEYS.SELECTED_MONTH, month);
+  }
+
+  static getActiveTab(): TabType {
+    const raw = safeGetItem(STORAGE_KEYS.ACTIVE_TAB);
+    const validTabs: TabType[] = [
+      'dashboard',
+      'clients',
+      'office-visits',
+      'monthly-work',
+      'gst-turnover-entry',
+      'gst-turnover-matrix',
+      'bank-turnover',
+      'reports',
+      'financial-years',
+      'users',
+      'activity-logs',
+      'import',
+      'export',
+      'settings',
+    ];
+    if (raw && validTabs.includes(raw as TabType)) {
+      return raw as TabType;
+    }
+    return 'dashboard';
+  }
+
+  static setActiveTab(tab: TabType) {
+    safeSetItem(STORAGE_KEYS.ACTIVE_TAB, tab);
   }
 
   // Central Comprehensive Activity & Audit Logger
