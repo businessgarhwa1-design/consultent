@@ -7,7 +7,7 @@ export const initialUsers: User[] = [
     email: 'admin@consultant.in',
     mobile: '9876543210',
     username: 'admin',
-    password_hash: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', // password: admin
+    password_hash: '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', // password: admin786
     role: 'admin',
     status: 'active',
     created_at: '2026-04-01 10:00:00',
