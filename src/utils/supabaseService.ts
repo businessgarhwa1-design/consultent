@@ -158,33 +158,88 @@ export class SupabaseService {
       }
 
       this.realtimeChannel = supabase
-        .channel('public-app-changes')
+        .channel('public-app-realtime-sync')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'app_sync_store' },
           (payload) => {
             console.log('⚡ Supabase Realtime update received (app_sync_store):', payload);
+            if (payload.new && (payload.new as any).key === 'complete_gst_portal_snapshot') {
+              const snap = (payload.new as any).data;
+              if (snap) {
+                if (snap.clients) GSTStorage.saveClients(snap.clients);
+                if (snap.monthly_work) GSTStorage.saveMonthlyWork(snap.monthly_work);
+                if (snap.office_visits) GSTStorage.saveOfficeVisits(snap.office_visits);
+                if (snap.gst_turnover) GSTStorage.saveGstTurnover(snap.gst_turnover);
+                if (snap.bank_turnover) GSTStorage.saveBankTurnover(snap.bank_turnover);
+                if (snap.bank_accounts) GSTStorage.saveBankAccounts(snap.bank_accounts);
+                if (snap.financial_years) GSTStorage.saveFinancialYears(snap.financial_years);
+              }
+            }
             if (onRemoteDataChanged) onRemoteDataChanged();
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'clients' },
-          () => {
+          (payload) => {
+            console.log('⚡ Supabase Realtime: clients updated', payload.eventType);
             if (onRemoteDataChanged) onRemoteDataChanged();
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'monthly_work' },
-          () => {
+          (payload) => {
+            console.log('⚡ Supabase Realtime: monthly_work updated', payload.eventType);
+            if (onRemoteDataChanged) onRemoteDataChanged();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'gst_turnover' },
+          (payload) => {
+            console.log('⚡ Supabase Realtime: gst_turnover updated', payload.eventType);
+            if (onRemoteDataChanged) onRemoteDataChanged();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'bank_turnover' },
+          (payload) => {
+            console.log('⚡ Supabase Realtime: bank_turnover updated', payload.eventType);
+            if (onRemoteDataChanged) onRemoteDataChanged();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'bank_accounts' },
+          (payload) => {
+            console.log('⚡ Supabase Realtime: bank_accounts updated', payload.eventType);
             if (onRemoteDataChanged) onRemoteDataChanged();
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'office_visits' },
-          () => {
+          (payload) => {
+            console.log('⚡ Supabase Realtime: office_visits updated', payload.eventType);
+            if (onRemoteDataChanged) onRemoteDataChanged();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'financial_years' },
+          (payload) => {
+            console.log('⚡ Supabase Realtime: financial_years updated', payload.eventType);
+            if (onRemoteDataChanged) onRemoteDataChanged();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'consultant_details' },
+          (payload) => {
+            console.log('⚡ Supabase Realtime: consultant_details updated', payload.eventType);
             if (onRemoteDataChanged) onRemoteDataChanged();
           }
         )
@@ -803,10 +858,23 @@ export class SupabaseService {
       }
 
       // 2. Try fetching from individual tables
-      const [clientsRes, workRes, visitsRes, consultantRes] = await Promise.allSettled([
+      const [
+        clientsRes,
+        workRes,
+        visitsRes,
+        gstTurnoverRes,
+        bankTurnoverRes,
+        bankAccountsRes,
+        financialYearsRes,
+        consultantRes,
+      ] = await Promise.allSettled([
         supabase.from('clients').select('*'),
         supabase.from('monthly_work').select('*'),
         supabase.from('office_visits').select('*'),
+        supabase.from('gst_turnover').select('*'),
+        supabase.from('bank_turnover').select('*'),
+        supabase.from('bank_accounts').select('*'),
+        supabase.from('financial_years').select('*'),
         supabase.from('consultant_details').select('*').eq('id', 'primary_consultant').single(),
       ]);
 
@@ -823,6 +891,22 @@ export class SupabaseService {
       }
       if (visitsRes.status === 'fulfilled' && visitsRes.value.data && visitsRes.value.data.length > 0) {
         fetchedData.office_visits = visitsRes.value.data;
+        hasAnyData = true;
+      }
+      if (gstTurnoverRes.status === 'fulfilled' && gstTurnoverRes.value.data && gstTurnoverRes.value.data.length > 0) {
+        fetchedData.gst_turnover = gstTurnoverRes.value.data;
+        hasAnyData = true;
+      }
+      if (bankTurnoverRes.status === 'fulfilled' && bankTurnoverRes.value.data && bankTurnoverRes.value.data.length > 0) {
+        fetchedData.bank_turnover = bankTurnoverRes.value.data;
+        hasAnyData = true;
+      }
+      if (bankAccountsRes.status === 'fulfilled' && bankAccountsRes.value.data && bankAccountsRes.value.data.length > 0) {
+        fetchedData.bank_accounts = bankAccountsRes.value.data;
+        hasAnyData = true;
+      }
+      if (financialYearsRes.status === 'fulfilled' && financialYearsRes.value.data && financialYearsRes.value.data.length > 0) {
+        fetchedData.financial_years = financialYearsRes.value.data;
         hasAnyData = true;
       }
       if (consultantRes.status === 'fulfilled' && consultantRes.value.data) {

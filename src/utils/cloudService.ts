@@ -80,6 +80,26 @@ export interface FirestoreErrorInfo {
   };
 }
 
+// Deep sanitize object/array to remove all `undefined` values before writing to Firestore
+export function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => cleanForFirestore(item)) as any;
+  }
+  if (typeof data === 'object') {
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      if (value !== undefined) {
+        cleaned[key] = cleanForFirestore(value);
+      }
+    }
+    return cleaned;
+  }
+  return data;
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
@@ -185,7 +205,7 @@ async function seedCollectionIfEmpty<T extends { id: any }>(
         if ('username' in itemDoc && 'password' in itemDoc && (itemDoc as any).password) {
           (itemDoc as any).password_hash = await hashPassword((itemDoc as any).password);
         }
-        await setDoc(doc(db, collectionName, String(item.id)), itemDoc);
+        await setDoc(doc(db, collectionName, String(item.id)), cleanForFirestore(itemDoc));
       }
     }
   } catch (err) {
@@ -476,7 +496,7 @@ export class CloudService {
   // Clients Cloud Sync
   static async syncClientToCloud(client: Client): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.CLIENTS, String(client.id)), client);
+      await setDoc(doc(db, COLLECTIONS.CLIENTS, String(client.id)), cleanForFirestore(client));
       const idx = cloudClients.findIndex((c) => c.id === client.id);
       if (idx !== -1) {
         cloudClients[idx] = client;
@@ -502,7 +522,7 @@ export class CloudService {
   // Monthly Work Cloud Sync
   static async syncMonthlyWorkToCloud(work: MonthlyWork): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.MONTHLY_WORK, String(work.id)), work);
+      await setDoc(doc(db, COLLECTIONS.MONTHLY_WORK, String(work.id)), cleanForFirestore(work));
       const idx = cloudMonthlyWork.findIndex((m) => m.id === work.id);
       if (idx !== -1) {
         cloudMonthlyWork[idx] = work;
@@ -519,7 +539,7 @@ export class CloudService {
     try {
       const batch = writeBatch(db);
       for (const work of works) {
-        batch.set(doc(db, COLLECTIONS.MONTHLY_WORK, String(work.id)), work);
+        batch.set(doc(db, COLLECTIONS.MONTHLY_WORK, String(work.id)), cleanForFirestore(work));
       }
       await batch.commit();
     } catch (err) {
@@ -530,7 +550,7 @@ export class CloudService {
   // Financial Years Cloud Sync
   static async syncFinancialYearToCloud(fy: FinancialYear): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.FINANCIAL_YEARS, String(fy.id)), fy);
+      await setDoc(doc(db, COLLECTIONS.FINANCIAL_YEARS, String(fy.id)), cleanForFirestore(fy));
       const idx = cloudFinancialYears.findIndex((f) => f.id === fy.id);
       if (idx !== -1) {
         cloudFinancialYears[idx] = fy;
@@ -546,7 +566,7 @@ export class CloudService {
   // Work History Cloud Sync
   static async syncWorkHistoryToCloud(history: WorkHistory): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.WORK_HISTORY, String(history.id)), history);
+      await setDoc(doc(db, COLLECTIONS.WORK_HISTORY, String(history.id)), cleanForFirestore(history));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.WORK_HISTORY}/${history.id}`);
     }
@@ -555,7 +575,7 @@ export class CloudService {
   // Activity Log Cloud Sync
   static async syncActivityLogToCloud(log: ActivityLog): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.ACTIVITY_LOGS, String(log.id)), log);
+      await setDoc(doc(db, COLLECTIONS.ACTIVITY_LOGS, String(log.id)), cleanForFirestore(log));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.ACTIVITY_LOGS}/${log.id}`);
     }
@@ -564,7 +584,7 @@ export class CloudService {
   // Settings Cloud Sync
   static async syncSettingsToCloud(settings: AppSettings): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.SETTINGS, 'app_config'), settings);
+      await setDoc(doc(db, COLLECTIONS.SETTINGS, 'app_config'), cleanForFirestore(settings));
       cloudSettings = settings;
       notifySubscribers();
     } catch (err) {
@@ -575,7 +595,7 @@ export class CloudService {
   // Bank Accounts Cloud Sync
   static async syncBankAccountToCloud(account: ClientBankAccount): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.BANK_ACCOUNTS, String(account.id)), account);
+      await setDoc(doc(db, COLLECTIONS.BANK_ACCOUNTS, String(account.id)), cleanForFirestore(account));
       const idx = cloudBankAccounts.findIndex((a) => a.id === account.id);
       if (idx !== -1) {
         cloudBankAccounts[idx] = account;
@@ -592,7 +612,7 @@ export class CloudService {
     try {
       const batch = writeBatch(db);
       for (const a of accounts) {
-        batch.set(doc(db, COLLECTIONS.BANK_ACCOUNTS, String(a.id)), a);
+        batch.set(doc(db, COLLECTIONS.BANK_ACCOUNTS, String(a.id)), cleanForFirestore(a));
       }
       await batch.commit();
       cloudBankAccounts = [...accounts];
@@ -615,7 +635,7 @@ export class CloudService {
   // Bank Turnover Cloud Sync
   static async syncBankTurnoverToCloud(turnover: ClientBankTurnover): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.BANK_TURNOVER, String(turnover.id)), turnover);
+      await setDoc(doc(db, COLLECTIONS.BANK_TURNOVER, String(turnover.id)), cleanForFirestore(turnover));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.BANK_TURNOVER}/${turnover.id}`);
     }
@@ -625,7 +645,7 @@ export class CloudService {
     try {
       const batch = writeBatch(db);
       for (const t of turnovers) {
-        batch.set(doc(db, COLLECTIONS.BANK_TURNOVER, String(t.id)), t);
+        batch.set(doc(db, COLLECTIONS.BANK_TURNOVER, String(t.id)), cleanForFirestore(t));
       }
       await batch.commit();
     } catch (err) {
@@ -636,7 +656,7 @@ export class CloudService {
   // Bank Statements Cloud Sync
   static async syncBankStatementToCloud(statement: BankStatementBackup): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.BANK_STATEMENTS, String(statement.id)), statement);
+      await setDoc(doc(db, COLLECTIONS.BANK_STATEMENTS, String(statement.id)), cleanForFirestore(statement));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.BANK_STATEMENTS}/${statement.id}`);
     }
@@ -653,7 +673,7 @@ export class CloudService {
   // GST Turnover Cloud Sync
   static async syncGstTurnoverToCloud(turnover: ClientGstTurnover): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.GST_TURNOVER, String(turnover.id)), turnover);
+      await setDoc(doc(db, COLLECTIONS.GST_TURNOVER, String(turnover.id)), cleanForFirestore(turnover));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${COLLECTIONS.GST_TURNOVER}/${turnover.id}`);
     }
@@ -663,7 +683,7 @@ export class CloudService {
     try {
       const batch = writeBatch(db);
       for (const g of turnovers) {
-        batch.set(doc(db, COLLECTIONS.GST_TURNOVER, String(g.id)), g);
+        batch.set(doc(db, COLLECTIONS.GST_TURNOVER, String(g.id)), cleanForFirestore(g));
       }
       await batch.commit();
     } catch (err) {
@@ -674,7 +694,7 @@ export class CloudService {
   // Office Visits Cloud Sync
   static async syncOfficeVisitToCloud(visit: OfficeVisit): Promise<void> {
     try {
-      await setDoc(doc(db, COLLECTIONS.OFFICE_VISITS, String(visit.id)), visit);
+      await setDoc(doc(db, COLLECTIONS.OFFICE_VISITS, String(visit.id)), cleanForFirestore(visit));
       const idx = cloudOfficeVisits.findIndex((v) => v.id === visit.id);
       if (idx !== -1) {
         cloudOfficeVisits[idx] = visit;
@@ -789,7 +809,7 @@ export class CloudService {
     };
 
     try {
-      await setDoc(doc(db, COLLECTIONS.USERS, String(newUser.id)), newUser);
+      await setDoc(doc(db, COLLECTIONS.USERS, String(newUser.id)), cleanForFirestore(newUser));
       cloudUsers.push(newUser);
       notifySubscribers();
       return { success: true, user: newUser };
@@ -832,11 +852,10 @@ export class CloudService {
 
     if (userData.newPassword && userData.newPassword.trim().length >= 6) {
       updates.password_hash = await hashPassword(userData.newPassword.trim());
-      updates.password = undefined;
     }
 
     try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, String(id)), updates);
+      await updateDoc(doc(db, COLLECTIONS.USERS, String(id)), cleanForFirestore(updates));
       const idx = cloudUsers.findIndex((u) => u.id === id);
       if (idx !== -1) {
         cloudUsers[idx] = { ...cloudUsers[idx], ...updates };
@@ -872,18 +891,17 @@ export class CloudService {
     const now = getISTTimestamp();
 
     try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, String(user.id)), {
+      await updateDoc(doc(db, COLLECTIONS.USERS, String(user.id)), cleanForFirestore({
         password_hash: passHash,
-        password: undefined,
         updated_at: now,
-      });
+      }));
       user.password_hash = passHash;
       user.updated_at = now;
       notifySubscribers();
       return { success: true };
     } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.USERS}/${user.id}`);
-      return { success: false, error: err.message || 'Failed to update password in cloud.' };
+      return { success: false, error: err.message || 'Failed to reset password.' };
     }
   }
 
@@ -964,7 +982,7 @@ export class CloudService {
         google_verified: false,
       };
 
-      await setDoc(doc(db, COLLECTIONS.PASSWORD_RESETS, tokenId), resetDoc);
+      await setDoc(doc(db, COLLECTIONS.PASSWORD_RESETS, tokenId), cleanForFirestore(resetDoc));
 
       return {
         success: true,
@@ -1044,12 +1062,12 @@ export class CloudService {
     googleSubjectId?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      await updateDoc(doc(db, COLLECTIONS.PASSWORD_RESETS, tokenId), {
+      await updateDoc(doc(db, COLLECTIONS.PASSWORD_RESETS, tokenId), cleanForFirestore({
         google_verified: true,
         google_email: googleEmail,
         google_subject_id: googleSubjectId || null,
         updated_at: getISTTimestamp(),
-      });
+      }));
       return { success: true };
     } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.PASSWORD_RESETS}/${tokenId}`);
@@ -1083,15 +1101,14 @@ export class CloudService {
     const now = getISTTimestamp();
 
     try {
-      await updateDoc(doc(db, COLLECTIONS.USERS, String(user.id)), {
+      await updateDoc(doc(db, COLLECTIONS.USERS, String(user.id)), cleanForFirestore({
         password_hash: passHash,
-        password: undefined,
         updated_at: now,
-      });
+      }));
 
-      await updateDoc(doc(db, COLLECTIONS.PASSWORD_RESETS, tokenDoc.id), {
+      await updateDoc(doc(db, COLLECTIONS.PASSWORD_RESETS, tokenDoc.id), cleanForFirestore({
         used_at: now,
-      });
+      }));
 
       user.password_hash = passHash;
       user.updated_at = now;

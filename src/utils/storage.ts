@@ -1645,7 +1645,7 @@ export class GSTStorage {
         taxable_turnover: taxable,
         exempt_turnover: exempt,
         total_gst_turnover: total,
-        remark: remark || undefined,
+        remark: remark || '',
         created_at: now,
         updated_at: now,
       });
@@ -1699,7 +1699,7 @@ export class GSTStorage {
         taxable_turnover: taxableNum,
         exempt_turnover: exemptNum,
         total_gst_turnover: total,
-        remark: remarkStr || undefined,
+        remark: remarkStr || '',
         updated_at: now,
       };
       all[existingIndex] = result;
@@ -1712,7 +1712,7 @@ export class GSTStorage {
         taxable_turnover: taxableNum,
         exempt_turnover: exemptNum,
         total_gst_turnover: total,
-        remark: remarkStr || undefined,
+        remark: remarkStr || '',
         created_at: now,
         updated_at: now,
       };

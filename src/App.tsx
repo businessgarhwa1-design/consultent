@@ -101,9 +101,26 @@ export default function App() {
     setCurrentUser(loadedCurUser);
     setOfficeVisits(loadedVisits);
 
-    // Initialize Cloud Connection
+    // Initialize Cloud Connection & Sync with Supabase
     CloudService.initDatabase();
-    SupabaseService.testConnection().catch(() => {});
+    SupabaseService.testConnection().then(() => {
+      SupabaseService.fetchAllProjectDataFromSupabase().then((res) => {
+        if (res.success && res.data) {
+          if (res.data.clients && Array.isArray(res.data.clients) && res.data.clients.length > 0) {
+            GSTStorage.saveClients(res.data.clients);
+            setClients(res.data.clients);
+          }
+          if (res.data.monthly_work && Array.isArray(res.data.monthly_work) && res.data.monthly_work.length > 0) {
+            GSTStorage.saveMonthlyWork(res.data.monthly_work);
+            setMonthlyWork(res.data.monthly_work);
+          }
+          if (res.data.office_visits && Array.isArray(res.data.office_visits) && res.data.office_visits.length > 0) {
+            GSTStorage.saveOfficeVisits(res.data.office_visits);
+            setOfficeVisits(res.data.office_visits);
+          }
+        }
+      }).catch((e) => console.warn('Supabase initial fetch notice:', e));
+    }).catch(() => {});
 
     // Subscribe to Supabase Realtime changes
     const unsubSupabase = SupabaseService.initRealtimeSubscription(() => {
