@@ -163,7 +163,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="admin or user@domain.com"
+                  placeholder="Enter your User ID or Email"
                   required
                   autoFocus
                   className="w-full bg-slate-900/90 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-medium"
@@ -257,40 +257,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
-
-          {/* Quick Admin Credentials Helper */}
-          <div className="mt-5 pt-4 border-t border-slate-700/60">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Default Admin Login Credentials:
-              </span>
-              <button
-                type="button"
-                id="auto-fill-admin-btn"
-                onClick={() => {
-                  setIdentifier('admin');
-                  setPassword('admin');
-                  setErrorMessage('');
-                }}
-                className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 underline cursor-pointer"
-              >
-                Auto-fill
-              </button>
-            </div>
-            <div className="bg-slate-900/80 rounded-xl p-3 border border-slate-700 text-xs font-mono space-y-1.5 text-slate-300">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Email / User ID:</span>
-                <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">admin</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Password:</span>
-                <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">admin</span>
-              </div>
-              <div className="text-[10px] text-slate-400 font-sans pt-1 border-t border-slate-800">
-                Alternative Password: <code className="text-slate-300 font-bold">Password@123</code> or <code className="text-slate-300 font-bold">admin123</code>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Footer info */}
