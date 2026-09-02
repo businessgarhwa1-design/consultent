@@ -222,9 +222,15 @@ export class GSTStorage {
     return this.getClients().find((c) => c.id === id);
   }
 
-  static saveClients(clients: Client[]) {
+  static saveClients(clients: Client[], syncRemote = true) {
     safeSetItem(STORAGE_KEYS.CLIENTS, JSON.stringify(clients));
-    SupabaseService.syncClientsBatch(clients).catch((e) => console.warn('Supabase sync clients error:', e));
+    if (syncRemote) {
+      SupabaseService.syncClientsBatch(clients).catch((e) => console.warn('Supabase sync clients error:', e));
+    }
+  }
+
+  static saveClientsLocally(clients: Client[]) {
+    safeSetItem(STORAGE_KEYS.CLIENTS, JSON.stringify(clients));
   }
 
   static getFinancialYears(): FinancialYear[] {
@@ -271,13 +277,18 @@ export class GSTStorage {
     return safeParse<MonthlyWork[]>(raw, initialMonthlyWork);
   }
 
-  static saveMonthlyWork(work: MonthlyWork[]) {
+  static saveMonthlyWork(work: MonthlyWork[], syncRemote = true) {
     safeSetItem(STORAGE_KEYS.MONTHLY_WORK, JSON.stringify(work));
-    // Asynchronously push to cloud for instant multi-PC sync
-    CloudService.batchSyncMonthlyWorkToCloud(work).catch((e) => console.warn('Cloud sync monthly work error:', e));
-    if (work.length > 0) {
-      SupabaseService.syncMonthlyWork(work[work.length - 1]).catch((e) => console.warn('Supabase sync monthly work error:', e));
+    if (syncRemote) {
+      CloudService.batchSyncMonthlyWorkToCloud(work).catch((e) => console.warn('Cloud sync monthly work error:', e));
+      if (work.length > 0) {
+        SupabaseService.syncMonthlyWork(work[work.length - 1]).catch((e) => console.warn('Supabase sync monthly work error:', e));
+      }
     }
+  }
+
+  static saveMonthlyWorkLocally(work: MonthlyWork[]) {
+    safeSetItem(STORAGE_KEYS.MONTHLY_WORK, JSON.stringify(work));
   }
 
   static getWorkHistory(): WorkHistory[] {
@@ -1411,6 +1422,7 @@ export class GSTStorage {
     const target = all.find((a) => a.id === accountId);
     all = all.filter((a) => a.id !== accountId);
     this.saveBankAccounts(all);
+    SupabaseService.deleteBankAccount(accountId).catch((e) => console.warn('Supabase delete bank account error:', e));
 
     if (target) {
       // Also clean associated turnover & backups for this account
@@ -1950,6 +1962,10 @@ export class GSTStorage {
     safeSetItem(STORAGE_KEYS.OFFICE_VISITS, JSON.stringify(visits));
   }
 
+  static saveOfficeVisitsLocally(visits: OfficeVisit[]) {
+    safeSetItem(STORAGE_KEYS.OFFICE_VISITS, JSON.stringify(visits));
+  }
+
   static getOfficeVisitById(id: number): OfficeVisit | undefined {
     return this.getOfficeVisits().find((v) => v.id === id);
   }
@@ -2175,6 +2191,7 @@ export class GSTStorage {
     const filtered = visits.filter((v) => v.id !== id);
     this.saveOfficeVisits(filtered);
     CloudService.deleteOfficeVisitFromCloud(id).catch((e) => console.warn('Cloud delete visit error:', e));
+    SupabaseService.deleteOfficeVisit(id).catch((e) => console.warn('Supabase delete visit error:', e));
 
     // Audit log
     this.logActivity(

@@ -139,19 +139,19 @@ export const COLLECTIONS = {
   PASSWORD_RESETS: 'portal_password_resets',
 };
 
-// In-Memory Synchronized Cloud Cache
+// In-Memory Synchronized Cloud Cache (Default to empty, populated from live database)
 let cloudUsers: User[] = [...initialUsers];
-let cloudClients: Client[] = [...initialClients];
+let cloudClients: Client[] = [];
 let cloudFinancialYears: FinancialYear[] = [...initialFinancialYears];
-let cloudMonthlyWork: MonthlyWork[] = [...initialMonthlyWork];
-let cloudWorkHistory: WorkHistory[] = [...initialWorkHistory];
-let cloudActivityLogs: ActivityLog[] = [...initialActivityLogs];
+let cloudMonthlyWork: MonthlyWork[] = [];
+let cloudWorkHistory: WorkHistory[] = [];
+let cloudActivityLogs: ActivityLog[] = [];
 let cloudSettings: AppSettings = { ...initialSettings };
-let cloudBankAccounts: ClientBankAccount[] = [...initialBankAccounts];
-let cloudBankTurnover: ClientBankTurnover[] = [...initialBankTurnover];
-let cloudBankStatements: BankStatementBackup[] = [...initialBankStatementBackups];
-let cloudGstTurnover: ClientGstTurnover[] = [...initialGstTurnover];
-let cloudOfficeVisits: OfficeVisit[] = [...initialOfficeVisits];
+let cloudBankAccounts: ClientBankAccount[] = [];
+let cloudBankTurnover: ClientBankTurnover[] = [];
+let cloudBankStatements: BankStatementBackup[] = [];
+let cloudGstTurnover: ClientGstTurnover[] = [];
+let cloudOfficeVisits: OfficeVisit[] = [];
 let isCloudInitialized = false;
 let isCloudOnline = false;
 
@@ -254,13 +254,11 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.CLIENTS),
         (snap) => {
-          if (!snap.empty) {
-            const list: Client[] = [];
-            snap.forEach((d) => list.push(d.data() as Client));
-            cloudClients = list;
-            isCloudOnline = true;
-            notifySubscribers();
-          }
+          const list: Client[] = [];
+          snap.forEach((d) => list.push(d.data() as Client));
+          cloudClients = list;
+          isCloudOnline = true;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.CLIENTS)
       );
@@ -269,13 +267,11 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.MONTHLY_WORK),
         (snap) => {
-          if (!snap.empty) {
-            const list: MonthlyWork[] = [];
-            snap.forEach((d) => list.push(d.data() as MonthlyWork));
-            cloudMonthlyWork = list;
-            isCloudOnline = true;
-            notifySubscribers();
-          }
+          const list: MonthlyWork[] = [];
+          snap.forEach((d) => list.push(d.data() as MonthlyWork));
+          cloudMonthlyWork = list;
+          isCloudOnline = true;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.MONTHLY_WORK)
       );
@@ -300,13 +296,11 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.WORK_HISTORY),
         (snap) => {
-          if (!snap.empty) {
-            const list: WorkHistory[] = [];
-            snap.forEach((d) => list.push(d.data() as WorkHistory));
-            list.sort((a, b) => b.id - a.id);
-            cloudWorkHistory = list;
-            notifySubscribers();
-          }
+          const list: WorkHistory[] = [];
+          snap.forEach((d) => list.push(d.data() as WorkHistory));
+          list.sort((a, b) => b.id - a.id);
+          cloudWorkHistory = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.WORK_HISTORY)
       );
@@ -315,13 +309,11 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.ACTIVITY_LOGS),
         (snap) => {
-          if (!snap.empty) {
-            const list: ActivityLog[] = [];
-            snap.forEach((d) => list.push(d.data() as ActivityLog));
-            list.sort((a, b) => b.id - a.id);
-            cloudActivityLogs = list;
-            notifySubscribers();
-          }
+          const list: ActivityLog[] = [];
+          snap.forEach((d) => list.push(d.data() as ActivityLog));
+          list.sort((a, b) => b.id - a.id);
+          cloudActivityLogs = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.ACTIVITY_LOGS)
       );
@@ -345,12 +337,10 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.BANK_ACCOUNTS),
         (snap) => {
-          if (!snap.empty) {
-            const list: ClientBankAccount[] = [];
-            snap.forEach((d) => list.push(d.data() as ClientBankAccount));
-            cloudBankAccounts = list;
-            notifySubscribers();
-          }
+          const list: ClientBankAccount[] = [];
+          snap.forEach((d) => list.push(d.data() as ClientBankAccount));
+          cloudBankAccounts = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.BANK_ACCOUNTS)
       );
@@ -359,12 +349,10 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.BANK_TURNOVER),
         (snap) => {
-          if (!snap.empty) {
-            const list: ClientBankTurnover[] = [];
-            snap.forEach((d) => list.push(d.data() as ClientBankTurnover));
-            cloudBankTurnover = list;
-            notifySubscribers();
-          }
+          const list: ClientBankTurnover[] = [];
+          snap.forEach((d) => list.push(d.data() as ClientBankTurnover));
+          cloudBankTurnover = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.BANK_TURNOVER)
       );
@@ -373,12 +361,10 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.BANK_STATEMENTS),
         (snap) => {
-          if (!snap.empty) {
-            const list: BankStatementBackup[] = [];
-            snap.forEach((d) => list.push(d.data() as BankStatementBackup));
-            cloudBankStatements = list;
-            notifySubscribers();
-          }
+          const list: BankStatementBackup[] = [];
+          snap.forEach((d) => list.push(d.data() as BankStatementBackup));
+          cloudBankStatements = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.BANK_STATEMENTS)
       );
@@ -387,12 +373,10 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.GST_TURNOVER),
         (snap) => {
-          if (!snap.empty) {
-            const list: ClientGstTurnover[] = [];
-            snap.forEach((d) => list.push(d.data() as ClientGstTurnover));
-            cloudGstTurnover = list;
-            notifySubscribers();
-          }
+          const list: ClientGstTurnover[] = [];
+          snap.forEach((d) => list.push(d.data() as ClientGstTurnover));
+          cloudGstTurnover = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.GST_TURNOVER)
       );
@@ -401,13 +385,11 @@ export class CloudService {
       onSnapshot(
         collection(db, COLLECTIONS.OFFICE_VISITS),
         (snap) => {
-          if (!snap.empty) {
-            const list: OfficeVisit[] = [];
-            snap.forEach((d) => list.push(d.data() as OfficeVisit));
-            list.sort((a, b) => b.id - a.id);
-            cloudOfficeVisits = list;
-            notifySubscribers();
-          }
+          const list: OfficeVisit[] = [];
+          snap.forEach((d) => list.push(d.data() as OfficeVisit));
+          list.sort((a, b) => b.id - a.id);
+          cloudOfficeVisits = list;
+          notifySubscribers();
         },
         (error) => handleFirestoreError(error, OperationType.GET, COLLECTIONS.OFFICE_VISITS)
       );
@@ -425,16 +407,14 @@ export class CloudService {
         uSnap.forEach((d) => uList.push(d.data() as User));
         cloudUsers = uList;
       }
-      if (!cSnap.empty) {
-        const cList: Client[] = [];
-        cSnap.forEach((d) => cList.push(d.data() as Client));
-        cloudClients = cList;
-      }
-      if (!mSnap.empty) {
-        const mList: MonthlyWork[] = [];
-        mSnap.forEach((d) => mList.push(d.data() as MonthlyWork));
-        cloudMonthlyWork = mList;
-      }
+      const cList: Client[] = [];
+      cSnap.forEach((d) => cList.push(d.data() as Client));
+      cloudClients = cList;
+
+      const mList: MonthlyWork[] = [];
+      mSnap.forEach((d) => mList.push(d.data() as MonthlyWork));
+      cloudMonthlyWork = mList;
+
       if (!fSnap.empty) {
         const fList: FinancialYear[] = [];
         fSnap.forEach((d) => fList.push(d.data() as FinancialYear));

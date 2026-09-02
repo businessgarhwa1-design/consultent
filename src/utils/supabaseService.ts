@@ -367,16 +367,39 @@ export class SupabaseService {
   }
 
   /**
-   * Delete Client from Supabase
+   * Delete Client and all related data from Supabase
    */
   static async deleteClient(clientId: number): Promise<void> {
     try {
       await Promise.allSettled([
         supabase.from('clients').delete().eq('id', clientId),
+        supabase.from('monthly_work').delete().eq('client_id', clientId),
+        supabase.from('office_visits').delete().eq('client_id', clientId),
+        supabase.from('bank_accounts').delete().eq('client_id', clientId),
+        supabase.from('bank_turnover').delete().eq('client_id', clientId),
+        supabase.from('gst_turnover').delete().eq('client_id', clientId),
         supabase.from('app_sync_store').delete().eq('key', `client_${clientId}`),
+        supabase.from('app_sync_store').delete().eq('key', 'complete_gst_portal_snapshot'),
+        supabase.from('app_sync_store').delete().eq('key', 'master_clients_list'),
       ]);
     } catch (err) {
       console.warn('Supabase deleteClient error:', err);
+    }
+  }
+
+  /**
+   * Delete Bank Account from Supabase
+   */
+  static async deleteBankAccount(accountId: number): Promise<void> {
+    try {
+      await Promise.allSettled([
+        supabase.from('bank_accounts').delete().eq('id', accountId),
+        supabase.from('bank_turnover').delete().eq('bank_account_id', accountId),
+        supabase.from('app_sync_store').delete().eq('key', 'complete_gst_portal_snapshot'),
+        supabase.from('app_sync_store').delete().eq('key', 'master_bank_accounts'),
+      ]);
+    } catch (err) {
+      console.warn('Supabase deleteBankAccount error:', err);
     }
   }
 
@@ -460,6 +483,7 @@ export class SupabaseService {
       await Promise.allSettled([
         supabase.from('office_visits').delete().eq('id', visitId),
         supabase.from('app_sync_store').delete().eq('key', `visit_${visitId}`),
+        supabase.from('app_sync_store').delete().eq('key', 'complete_gst_portal_snapshot'),
       ]);
     } catch (err) {
       console.warn('Supabase deleteOfficeVisit error:', err);
@@ -824,7 +848,7 @@ export class SupabaseService {
   }
 
   /**
-   * Fetch Master Snapshot or All Data from Supabase
+   * Fetch Master Snapshot or All Data directly from Supabase Relational Tables
    */
   static async fetchAllProjectDataFromSupabase(): Promise<{
     success: boolean;
@@ -835,7 +859,79 @@ export class SupabaseService {
     notifyListeners();
 
     try {
-      // 1. Try fetching full master snapshot
+      // 1. Primary Source of Truth: Fetch from individual relational tables directly
+      const [
+        clientsRes,
+        workRes,
+        visitsRes,
+        gstTurnoverRes,
+        bankTurnoverRes,
+        bankAccountsRes,
+        financialYearsRes,
+        consultantRes,
+      ] = await Promise.allSettled([
+        supabase.from('clients').select('*').order('id', { ascending: true }),
+        supabase.from('monthly_work').select('*'),
+        supabase.from('office_visits').select('*').order('id', { ascending: false }),
+        supabase.from('gst_turnover').select('*'),
+        supabase.from('bank_turnover').select('*'),
+        supabase.from('bank_accounts').select('*'),
+        supabase.from('financial_years').select('*').order('start_year', { ascending: true }),
+        supabase.from('consultant_details').select('*').eq('id', 'primary_consultant').single(),
+      ]);
+
+      const fetchedData: any = {};
+      let isTableQuerySuccessful = false;
+
+      if (clientsRes.status === 'fulfilled' && clientsRes.value.data !== null && !clientsRes.value.error) {
+        fetchedData.clients = clientsRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (workRes.status === 'fulfilled' && workRes.value.data !== null && !workRes.value.error) {
+        fetchedData.monthly_work = workRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (visitsRes.status === 'fulfilled' && visitsRes.value.data !== null && !visitsRes.value.error) {
+        fetchedData.office_visits = visitsRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (gstTurnoverRes.status === 'fulfilled' && gstTurnoverRes.value.data !== null && !gstTurnoverRes.value.error) {
+        fetchedData.gst_turnover = gstTurnoverRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (bankTurnoverRes.status === 'fulfilled' && bankTurnoverRes.value.data !== null && !bankTurnoverRes.value.error) {
+        fetchedData.bank_turnover = bankTurnoverRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (bankAccountsRes.status === 'fulfilled' && bankAccountsRes.value.data !== null && !bankAccountsRes.value.error) {
+        fetchedData.bank_accounts = bankAccountsRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (financialYearsRes.status === 'fulfilled' && financialYearsRes.value.data !== null && !financialYearsRes.value.error) {
+        fetchedData.financial_years = financialYearsRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+      if (consultantRes.status === 'fulfilled' && consultantRes.value.data) {
+        fetchedData.consultant_details = consultantRes.value.data;
+        isTableQuerySuccessful = true;
+      }
+
+      if (isTableQuerySuccessful) {
+        const nowTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+        syncStatus.isFetching = false;
+        syncStatus.lastFetchedAt = nowTime;
+        syncStatus.connected = true;
+        syncStatus.successMessage = `Supabase live tables synced (${nowTime} IST)`;
+        notifyListeners();
+
+        return {
+          success: true,
+          data: fetchedData,
+          message: 'Supabase relational tables se live data successfully fetch kiya gaya.',
+        };
+      }
+
+      // 2. Fallback only if individual tables failed
       const { data: snapshotRes, error: snapErr } = await supabase
         .from('app_sync_store')
         .select('data')
@@ -847,71 +943,13 @@ export class SupabaseService {
         syncStatus.isFetching = false;
         syncStatus.lastFetchedAt = nowTime;
         syncStatus.connected = true;
-        syncStatus.successMessage = `Supabase se live data successfully fetch ho gaya! (${nowTime} IST)`;
         notifyListeners();
 
         return {
           success: true,
           data: snapshotRes.data,
-          message: 'Supabase se live master snapshot successfully fetch ho gaya!',
+          message: 'Supabase snapshot backup se data fetch kiya gaya.',
         };
-      }
-
-      // 2. Try fetching from individual tables
-      const [
-        clientsRes,
-        workRes,
-        visitsRes,
-        gstTurnoverRes,
-        bankTurnoverRes,
-        bankAccountsRes,
-        financialYearsRes,
-        consultantRes,
-      ] = await Promise.allSettled([
-        supabase.from('clients').select('*'),
-        supabase.from('monthly_work').select('*'),
-        supabase.from('office_visits').select('*'),
-        supabase.from('gst_turnover').select('*'),
-        supabase.from('bank_turnover').select('*'),
-        supabase.from('bank_accounts').select('*'),
-        supabase.from('financial_years').select('*'),
-        supabase.from('consultant_details').select('*').eq('id', 'primary_consultant').single(),
-      ]);
-
-      const fetchedData: any = {};
-      let hasAnyData = false;
-
-      if (clientsRes.status === 'fulfilled' && clientsRes.value.data && clientsRes.value.data.length > 0) {
-        fetchedData.clients = clientsRes.value.data;
-        hasAnyData = true;
-      }
-      if (workRes.status === 'fulfilled' && workRes.value.data && workRes.value.data.length > 0) {
-        fetchedData.monthly_work = workRes.value.data;
-        hasAnyData = true;
-      }
-      if (visitsRes.status === 'fulfilled' && visitsRes.value.data && visitsRes.value.data.length > 0) {
-        fetchedData.office_visits = visitsRes.value.data;
-        hasAnyData = true;
-      }
-      if (gstTurnoverRes.status === 'fulfilled' && gstTurnoverRes.value.data && gstTurnoverRes.value.data.length > 0) {
-        fetchedData.gst_turnover = gstTurnoverRes.value.data;
-        hasAnyData = true;
-      }
-      if (bankTurnoverRes.status === 'fulfilled' && bankTurnoverRes.value.data && bankTurnoverRes.value.data.length > 0) {
-        fetchedData.bank_turnover = bankTurnoverRes.value.data;
-        hasAnyData = true;
-      }
-      if (bankAccountsRes.status === 'fulfilled' && bankAccountsRes.value.data && bankAccountsRes.value.data.length > 0) {
-        fetchedData.bank_accounts = bankAccountsRes.value.data;
-        hasAnyData = true;
-      }
-      if (financialYearsRes.status === 'fulfilled' && financialYearsRes.value.data && financialYearsRes.value.data.length > 0) {
-        fetchedData.financial_years = financialYearsRes.value.data;
-        hasAnyData = true;
-      }
-      if (consultantRes.status === 'fulfilled' && consultantRes.value.data) {
-        fetchedData.consultant_details = consultantRes.value.data;
-        hasAnyData = true;
       }
 
       const nowTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -920,19 +958,11 @@ export class SupabaseService {
       syncStatus.connected = true;
       notifyListeners();
 
-      if (hasAnyData) {
-        return {
-          success: true,
-          data: fetchedData,
-          message: 'Supabase tables se data successfully fetch kiya gaya.',
-        };
-      } else {
-        return {
-          success: true,
-          data: null,
-          message: 'Supabase connected hai. Abhi tak koi purana remote snapshot nahi mila, local data synced hai.',
-        };
-      }
+      return {
+        success: true,
+        data: null,
+        message: 'Supabase connected hai.',
+      };
     } catch (err: any) {
       console.warn('Supabase fetch error:', err);
       syncStatus.isFetching = false;

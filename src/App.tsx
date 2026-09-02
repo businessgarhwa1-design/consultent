@@ -113,17 +113,30 @@ export default function App() {
     SupabaseService.testConnection().then(() => {
       SupabaseService.fetchAllProjectDataFromSupabase().then((res) => {
         if (res.success && res.data) {
-          if (res.data.clients && Array.isArray(res.data.clients) && res.data.clients.length > 0) {
-            GSTStorage.saveClients(res.data.clients);
+          if (Array.isArray(res.data.clients)) {
+            GSTStorage.saveClientsLocally(res.data.clients);
             setClients(res.data.clients);
           }
-          if (res.data.monthly_work && Array.isArray(res.data.monthly_work) && res.data.monthly_work.length > 0) {
-            GSTStorage.saveMonthlyWork(res.data.monthly_work);
+          if (Array.isArray(res.data.monthly_work)) {
+            GSTStorage.saveMonthlyWorkLocally(res.data.monthly_work);
             setMonthlyWork(res.data.monthly_work);
           }
-          if (res.data.office_visits && Array.isArray(res.data.office_visits) && res.data.office_visits.length > 0) {
-            GSTStorage.saveOfficeVisits(res.data.office_visits);
+          if (Array.isArray(res.data.office_visits)) {
+            GSTStorage.saveOfficeVisitsLocally(res.data.office_visits);
             setOfficeVisits(res.data.office_visits);
+          }
+          if (Array.isArray(res.data.financial_years) && res.data.financial_years.length > 0) {
+            GSTStorage.saveFinancialYears(res.data.financial_years);
+            setFinancialYears(res.data.financial_years);
+          }
+          if (Array.isArray(res.data.bank_accounts)) {
+            GSTStorage.saveBankAccounts(res.data.bank_accounts);
+          }
+          if (Array.isArray(res.data.gst_turnover)) {
+            GSTStorage.saveGstTurnover(res.data.gst_turnover);
+          }
+          if (Array.isArray(res.data.bank_turnover)) {
+            GSTStorage.saveBankTurnover(res.data.bank_turnover);
           }
         }
       }).catch((e) => console.warn('Supabase initial fetch notice:', e));
@@ -145,17 +158,9 @@ export default function App() {
       if (cloudU && cloudU.length > 0) {
         setUsers(cloudU);
       }
-      const cloudC = CloudService.getCachedClients();
-      if (cloudC && cloudC.length > 0) {
-        setClients(cloudC);
-      }
       const cloudFY = CloudService.getCachedFinancialYears();
       if (cloudFY && cloudFY.length > 0) {
         setFinancialYears(cloudFY);
-      }
-      const cloudMW = CloudService.getCachedMonthlyWork();
-      if (cloudMW && cloudMW.length > 0) {
-        setMonthlyWork(cloudMW);
       }
       const cloudHist = CloudService.getCachedWorkHistory();
       if (cloudHist && cloudHist.length > 0) {
@@ -164,10 +169,6 @@ export default function App() {
       const cloudLogs = CloudService.getCachedActivityLogs();
       if (cloudLogs && cloudLogs.length > 0) {
         setActivityLogs(cloudLogs);
-      }
-      const cloudVisits = CloudService.getCachedOfficeVisits();
-      if (cloudVisits && cloudVisits.length > 0) {
-        setOfficeVisits(cloudVisits);
       }
       const cloudSettings = CloudService.getCachedSettings();
       if (cloudSettings) {
@@ -261,6 +262,10 @@ export default function App() {
         `Are you sure you want to permanently delete "${client.firm_name}" (${client.gstin}) and all related monthly records?`
       )
     ) {
+      // Immediate optimistic state update
+      setClients((prev) => prev.filter((c) => c.id !== client.id));
+      setMonthlyWork((prev) => prev.filter((m) => m.client_id !== client.id));
+
       const res = GSTStorage.deleteClient(client.id);
       if (res.success) {
         setClients(GSTStorage.getClients());
@@ -542,6 +547,9 @@ export default function App() {
   };
 
   const handleDeleteOfficeVisit = (id: number) => {
+    // Immediate optimistic state update
+    setOfficeVisits((prev) => prev.filter((v) => v.id !== id));
+
     const res = GSTStorage.deleteOfficeVisit(id);
     if (res.success) {
       setOfficeVisits(GSTStorage.getOfficeVisits());
@@ -557,14 +565,26 @@ export default function App() {
       try {
         const remoteRes = await SupabaseService.fetchAllProjectDataFromSupabase();
         if (remoteRes.success && remoteRes.data) {
-          if (remoteRes.data.clients && Array.isArray(remoteRes.data.clients) && remoteRes.data.clients.length > 0) {
-            GSTStorage.saveClients(remoteRes.data.clients);
+          if (Array.isArray(remoteRes.data.clients)) {
+            GSTStorage.saveClientsLocally(remoteRes.data.clients);
           }
-          if (remoteRes.data.monthly_work && Array.isArray(remoteRes.data.monthly_work) && remoteRes.data.monthly_work.length > 0) {
-            GSTStorage.saveMonthlyWork(remoteRes.data.monthly_work);
+          if (Array.isArray(remoteRes.data.monthly_work)) {
+            GSTStorage.saveMonthlyWorkLocally(remoteRes.data.monthly_work);
           }
-          if (remoteRes.data.office_visits && Array.isArray(remoteRes.data.office_visits) && remoteRes.data.office_visits.length > 0) {
-            GSTStorage.saveOfficeVisits(remoteRes.data.office_visits);
+          if (Array.isArray(remoteRes.data.office_visits)) {
+            GSTStorage.saveOfficeVisitsLocally(remoteRes.data.office_visits);
+          }
+          if (Array.isArray(remoteRes.data.financial_years) && remoteRes.data.financial_years.length > 0) {
+            GSTStorage.saveFinancialYears(remoteRes.data.financial_years);
+          }
+          if (Array.isArray(remoteRes.data.bank_accounts)) {
+            GSTStorage.saveBankAccounts(remoteRes.data.bank_accounts);
+          }
+          if (Array.isArray(remoteRes.data.gst_turnover)) {
+            GSTStorage.saveGstTurnover(remoteRes.data.gst_turnover);
+          }
+          if (Array.isArray(remoteRes.data.bank_turnover)) {
+            GSTStorage.saveBankTurnover(remoteRes.data.bank_turnover);
           }
         }
       } catch (cloudErr) {
