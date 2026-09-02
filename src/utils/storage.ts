@@ -149,6 +149,51 @@ function safeParse<T>(raw: string | null, defaultValue: T): T {
   }
 }
 
+// Auto-purge any stale legacy demo data from prior preview caches so portal is 100% blank
+const PURGE_FLAG_KEY = 'gst_app_purged_demo_blank_v3';
+function purgeLegacyDemoData() {
+  try {
+    const isPurged = safeGetItem(PURGE_FLAG_KEY);
+    if (!isPurged) {
+      const rawClients = safeGetItem(STORAGE_KEYS.CLIENTS);
+      if (rawClients) {
+        try {
+          const parsed = JSON.parse(rawClients);
+          if (
+            Array.isArray(parsed) &&
+            parsed.some(
+              (c: any) =>
+                c.firm_name?.includes('Apex Infotech') ||
+                c.firm_name?.includes('Bharat Chemical') ||
+                c.client_name?.includes('Rajesh Nair') ||
+                c.id === 101 ||
+                c.id === 102 ||
+                c.id === 103
+            )
+          ) {
+            safeSetItem(STORAGE_KEYS.CLIENTS, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.MONTHLY_WORK, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.OFFICE_VISITS, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.BANK_ACCOUNTS, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.BANK_TURNOVER, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.BANK_STATEMENTS, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.WORK_HISTORY, JSON.stringify([]));
+            safeSetItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify([]));
+          }
+        } catch {
+          // ignore
+        }
+      }
+      safeSetItem(PURGE_FLAG_KEY, 'true');
+    }
+  } catch {
+    // ignore
+  }
+}
+
+purgeLegacyDemoData();
+
 export class GSTStorage {
   // Getters
   static getUsers(): User[] {
@@ -179,6 +224,7 @@ export class GSTStorage {
 
   static saveClients(clients: Client[]) {
     safeSetItem(STORAGE_KEYS.CLIENTS, JSON.stringify(clients));
+    SupabaseService.syncClientsBatch(clients).catch((e) => console.warn('Supabase sync clients error:', e));
   }
 
   static getFinancialYears(): FinancialYear[] {

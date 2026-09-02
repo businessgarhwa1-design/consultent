@@ -261,7 +261,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
         {/* Footer info */}
         <div className="mt-6 text-center text-xs text-slate-400 space-y-1">
-          <p>Protected by Enterprise Cloud Firestore & Multi-Device Realtime Sync</p>
+          <p>Powered by Supabase Realtime Database & Multi-Device Live Sync</p>
           <p className="text-slate-400 text-[11px]">Authorized personnel login only. Sessions are securely encrypted.</p>
         </div>
       </div>
