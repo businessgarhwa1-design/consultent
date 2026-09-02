@@ -113,15 +113,15 @@ export default function App() {
     SupabaseService.testConnection().then(() => {
       SupabaseService.fetchAllProjectDataFromSupabase().then((res) => {
         if (res.success && res.data) {
-          if (Array.isArray(res.data.clients)) {
+          if (Array.isArray(res.data.clients) && res.data.clients.length > 0) {
             GSTStorage.saveClientsLocally(res.data.clients);
             setClients(res.data.clients);
           }
-          if (Array.isArray(res.data.monthly_work)) {
+          if (Array.isArray(res.data.monthly_work) && res.data.monthly_work.length > 0) {
             GSTStorage.saveMonthlyWorkLocally(res.data.monthly_work);
             setMonthlyWork(res.data.monthly_work);
           }
-          if (Array.isArray(res.data.office_visits)) {
+          if (Array.isArray(res.data.office_visits) && res.data.office_visits.length > 0) {
             GSTStorage.saveOfficeVisitsLocally(res.data.office_visits);
             setOfficeVisits(res.data.office_visits);
           }
@@ -129,13 +129,13 @@ export default function App() {
             GSTStorage.saveFinancialYears(res.data.financial_years);
             setFinancialYears(res.data.financial_years);
           }
-          if (Array.isArray(res.data.bank_accounts)) {
+          if (Array.isArray(res.data.bank_accounts) && res.data.bank_accounts.length > 0) {
             GSTStorage.saveBankAccounts(res.data.bank_accounts);
           }
-          if (Array.isArray(res.data.gst_turnover)) {
+          if (Array.isArray(res.data.gst_turnover) && res.data.gst_turnover.length > 0) {
             GSTStorage.saveGstTurnover(res.data.gst_turnover);
           }
-          if (Array.isArray(res.data.bank_turnover)) {
+          if (Array.isArray(res.data.bank_turnover) && res.data.bank_turnover.length > 0) {
             GSTStorage.saveBankTurnover(res.data.bank_turnover);
           }
         }
@@ -565,25 +565,25 @@ export default function App() {
       try {
         const remoteRes = await SupabaseService.fetchAllProjectDataFromSupabase();
         if (remoteRes.success && remoteRes.data) {
-          if (Array.isArray(remoteRes.data.clients)) {
+          if (Array.isArray(remoteRes.data.clients) && remoteRes.data.clients.length > 0) {
             GSTStorage.saveClientsLocally(remoteRes.data.clients);
           }
-          if (Array.isArray(remoteRes.data.monthly_work)) {
+          if (Array.isArray(remoteRes.data.monthly_work) && remoteRes.data.monthly_work.length > 0) {
             GSTStorage.saveMonthlyWorkLocally(remoteRes.data.monthly_work);
           }
-          if (Array.isArray(remoteRes.data.office_visits)) {
+          if (Array.isArray(remoteRes.data.office_visits) && remoteRes.data.office_visits.length > 0) {
             GSTStorage.saveOfficeVisitsLocally(remoteRes.data.office_visits);
           }
           if (Array.isArray(remoteRes.data.financial_years) && remoteRes.data.financial_years.length > 0) {
             GSTStorage.saveFinancialYears(remoteRes.data.financial_years);
           }
-          if (Array.isArray(remoteRes.data.bank_accounts)) {
+          if (Array.isArray(remoteRes.data.bank_accounts) && remoteRes.data.bank_accounts.length > 0) {
             GSTStorage.saveBankAccounts(remoteRes.data.bank_accounts);
           }
-          if (Array.isArray(remoteRes.data.gst_turnover)) {
+          if (Array.isArray(remoteRes.data.gst_turnover) && remoteRes.data.gst_turnover.length > 0) {
             GSTStorage.saveGstTurnover(remoteRes.data.gst_turnover);
           }
-          if (Array.isArray(remoteRes.data.bank_turnover)) {
+          if (Array.isArray(remoteRes.data.bank_turnover) && remoteRes.data.bank_turnover.length > 0) {
             GSTStorage.saveBankTurnover(remoteRes.data.bank_turnover);
           }
         }

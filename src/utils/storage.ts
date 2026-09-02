@@ -266,6 +266,7 @@ export class GSTStorage {
 
   static saveFinancialYears(fys: FinancialYear[]) {
     safeSetItem(STORAGE_KEYS.FINANCIAL_YEARS, JSON.stringify(fys));
+    SupabaseService.syncFinancialYears(fys).catch((e) => console.warn('Supabase sync FY error:', e));
   }
 
   static getMonthlyWork(): MonthlyWork[] {
@@ -2156,6 +2157,7 @@ export class GSTStorage {
     visits[idx] = updatedVisit;
     this.saveOfficeVisits(visits);
     CloudService.syncOfficeVisitToCloud(updatedVisit).catch((e) => console.warn('Cloud sync visit out error:', e));
+    SupabaseService.syncOfficeVisit(updatedVisit).catch((e) => console.warn('Supabase sync visit out error:', e));
 
     // Audit log
     this.logActivity(
