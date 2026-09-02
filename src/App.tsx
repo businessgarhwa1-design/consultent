@@ -147,9 +147,15 @@ export default function App() {
       const freshVisits = GSTStorage.getOfficeVisits();
       const freshClients = GSTStorage.getClients();
       const freshWork = GSTStorage.getMonthlyWork();
+      const freshFY = GSTStorage.getFinancialYears();
+      const freshSettings = GSTStorage.getSettings();
+      const freshUsers = GSTStorage.getUsers();
       setOfficeVisits(freshVisits);
       setClients(freshClients);
       setMonthlyWork(freshWork);
+      setFinancialYears(freshFY);
+      setSettings(freshSettings);
+      setUsers(freshUsers);
     });
 
     // Subscribe to cross-device sync

@@ -476,6 +476,30 @@ export class SupabaseService {
   }
 
   /**
+   * Batch Sync Office Visits to Supabase
+   */
+  static async syncOfficeVisitsBatch(visits: OfficeVisit[]): Promise<void> {
+    try {
+      if (visits.length === 0) return;
+      await Promise.allSettled([
+        supabase.from('office_visits').upsert(visits, { onConflict: 'id' }),
+        supabase.from('app_sync_store').upsert(
+          {
+            key: 'master_office_visits',
+            data: visits,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'key' }
+        ),
+      ]);
+      syncStatus.tablesStatus.officeVisits = true;
+      notifyListeners();
+    } catch (err) {
+      console.warn('Supabase syncOfficeVisitsBatch error:', err);
+    }
+  }
+
+  /**
    * Delete Office Visit from Supabase
    */
   static async deleteOfficeVisit(visitId: number): Promise<void> {
@@ -848,7 +872,7 @@ export class SupabaseService {
   }
 
   /**
-   * Fetch Master Snapshot or All Data directly from Supabase Relational Tables
+   * Fetch Master Snapshot or All Data directly from Supabase Relational Tables & Sync Store
    */
   static async fetchAllProjectDataFromSupabase(): Promise<{
     success: boolean;
@@ -859,7 +883,7 @@ export class SupabaseService {
     notifyListeners();
 
     try {
-      // 1. Primary Source of Truth: Fetch from individual relational tables directly
+      // 1. Fetch from individual relational tables and sync store keys in parallel
       const [
         clientsRes,
         workRes,
@@ -869,6 +893,14 @@ export class SupabaseService {
         bankAccountsRes,
         financialYearsRes,
         consultantRes,
+        snapshotRes,
+        clientsStoreRes,
+        workStoreRes,
+        bankAccountsStoreRes,
+        bankTurnoverStoreRes,
+        gstTurnoverStoreRes,
+        visitsStoreRes,
+        fyStoreRes,
       ] = await Promise.allSettled([
         supabase.from('clients').select('*').order('id', { ascending: true }),
         supabase.from('monthly_work').select('*'),
@@ -877,91 +909,104 @@ export class SupabaseService {
         supabase.from('bank_turnover').select('*'),
         supabase.from('bank_accounts').select('*'),
         supabase.from('financial_years').select('*').order('start_year', { ascending: true }),
-        supabase.from('consultant_details').select('*').eq('id', 'primary_consultant').single(),
+        supabase.from('consultant_details').select('*').eq('id', 'primary_consultant').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'complete_gst_portal_snapshot').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_clients_list').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_monthly_work_list').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_bank_accounts').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_bank_turnover').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_gst_turnover').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_office_visits').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_financial_years').maybeSingle(),
       ]);
 
       const fetchedData: any = {};
-      let isTableQuerySuccessful = false;
+      const snapData = snapshotRes.status === 'fulfilled' && snapshotRes.value?.data ? snapshotRes.value.data.data : null;
 
-      if (clientsRes.status === 'fulfilled' && clientsRes.value.data !== null && !clientsRes.value.error) {
+      // 1. Clients
+      if (clientsRes.status === 'fulfilled' && Array.isArray(clientsRes.value.data) && clientsRes.value.data.length > 0) {
         fetchedData.clients = clientsRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (clientsStoreRes.status === 'fulfilled' && Array.isArray(clientsStoreRes.value?.data?.data) && clientsStoreRes.value.data.data.length > 0) {
+        fetchedData.clients = clientsStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.clients) && snapData.clients.length > 0) {
+        fetchedData.clients = snapData.clients;
       }
-      if (workRes.status === 'fulfilled' && workRes.value.data !== null && !workRes.value.error) {
+
+      // 2. Monthly Work
+      if (workRes.status === 'fulfilled' && Array.isArray(workRes.value.data) && workRes.value.data.length > 0) {
         fetchedData.monthly_work = workRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (workStoreRes.status === 'fulfilled' && Array.isArray(workStoreRes.value?.data?.data) && workStoreRes.value.data.data.length > 0) {
+        fetchedData.monthly_work = workStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.monthly_work) && snapData.monthly_work.length > 0) {
+        fetchedData.monthly_work = snapData.monthly_work;
       }
-      if (visitsRes.status === 'fulfilled' && visitsRes.value.data !== null && !visitsRes.value.error) {
+
+      // 3. Office Visits
+      if (visitsRes.status === 'fulfilled' && Array.isArray(visitsRes.value.data) && visitsRes.value.data.length > 0) {
         fetchedData.office_visits = visitsRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (visitsStoreRes.status === 'fulfilled' && Array.isArray(visitsStoreRes.value?.data?.data) && visitsStoreRes.value.data.data.length > 0) {
+        fetchedData.office_visits = visitsStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.office_visits) && snapData.office_visits.length > 0) {
+        fetchedData.office_visits = snapData.office_visits;
       }
-      if (gstTurnoverRes.status === 'fulfilled' && gstTurnoverRes.value.data !== null && !gstTurnoverRes.value.error) {
+
+      // 4. GST Turnover
+      if (gstTurnoverRes.status === 'fulfilled' && Array.isArray(gstTurnoverRes.value.data) && gstTurnoverRes.value.data.length > 0) {
         fetchedData.gst_turnover = gstTurnoverRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (gstTurnoverStoreRes.status === 'fulfilled' && Array.isArray(gstTurnoverStoreRes.value?.data?.data) && gstTurnoverStoreRes.value.data.data.length > 0) {
+        fetchedData.gst_turnover = gstTurnoverStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.gst_turnover) && snapData.gst_turnover.length > 0) {
+        fetchedData.gst_turnover = snapData.gst_turnover;
       }
-      if (bankTurnoverRes.status === 'fulfilled' && bankTurnoverRes.value.data !== null && !bankTurnoverRes.value.error) {
+
+      // 5. Bank Turnover
+      if (bankTurnoverRes.status === 'fulfilled' && Array.isArray(bankTurnoverRes.value.data) && bankTurnoverRes.value.data.length > 0) {
         fetchedData.bank_turnover = bankTurnoverRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (bankTurnoverStoreRes.status === 'fulfilled' && Array.isArray(bankTurnoverStoreRes.value?.data?.data) && bankTurnoverStoreRes.value.data.data.length > 0) {
+        fetchedData.bank_turnover = bankTurnoverStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.bank_turnover) && snapData.bank_turnover.length > 0) {
+        fetchedData.bank_turnover = snapData.bank_turnover;
       }
-      if (bankAccountsRes.status === 'fulfilled' && bankAccountsRes.value.data !== null && !bankAccountsRes.value.error) {
+
+      // 6. Bank Accounts
+      if (bankAccountsRes.status === 'fulfilled' && Array.isArray(bankAccountsRes.value.data) && bankAccountsRes.value.data.length > 0) {
         fetchedData.bank_accounts = bankAccountsRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (bankAccountsStoreRes.status === 'fulfilled' && Array.isArray(bankAccountsStoreRes.value?.data?.data) && bankAccountsStoreRes.value.data.data.length > 0) {
+        fetchedData.bank_accounts = bankAccountsStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.bank_accounts) && snapData.bank_accounts.length > 0) {
+        fetchedData.bank_accounts = snapData.bank_accounts;
       }
-      if (financialYearsRes.status === 'fulfilled' && financialYearsRes.value.data !== null && !financialYearsRes.value.error) {
+
+      // 7. Financial Years
+      if (financialYearsRes.status === 'fulfilled' && Array.isArray(financialYearsRes.value.data) && financialYearsRes.value.data.length > 0) {
         fetchedData.financial_years = financialYearsRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (fyStoreRes.status === 'fulfilled' && Array.isArray(fyStoreRes.value?.data?.data) && fyStoreRes.value.data.data.length > 0) {
+        fetchedData.financial_years = fyStoreRes.value.data.data;
+      } else if (snapData && Array.isArray(snapData.financial_years) && snapData.financial_years.length > 0) {
+        fetchedData.financial_years = snapData.financial_years;
       }
-      if (consultantRes.status === 'fulfilled' && consultantRes.value.data) {
+
+      // 8. Consultant Details
+      if (consultantRes.status === 'fulfilled' && consultantRes.value?.data) {
         fetchedData.consultant_details = consultantRes.value.data;
-        isTableQuerySuccessful = true;
+      } else if (snapData && snapData.consultant_details) {
+        fetchedData.consultant_details = snapData.consultant_details;
       }
 
-      if (isTableQuerySuccessful) {
-        const nowTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
-        syncStatus.isFetching = false;
-        syncStatus.lastFetchedAt = nowTime;
-        syncStatus.connected = true;
-        syncStatus.successMessage = `Supabase live tables synced (${nowTime} IST)`;
-        notifyListeners();
-
-        return {
-          success: true,
-          data: fetchedData,
-          message: 'Supabase relational tables se live data successfully fetch kiya gaya.',
-        };
-      }
-
-      // 2. Fallback only if individual tables failed
-      const { data: snapshotRes, error: snapErr } = await supabase
-        .from('app_sync_store')
-        .select('data')
-        .eq('key', 'complete_gst_portal_snapshot')
-        .single();
-
-      if (!snapErr && snapshotRes?.data) {
-        const nowTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
-        syncStatus.isFetching = false;
-        syncStatus.lastFetchedAt = nowTime;
-        syncStatus.connected = true;
-        notifyListeners();
-
-        return {
-          success: true,
-          data: snapshotRes.data,
-          message: 'Supabase snapshot backup se data fetch kiya gaya.',
-        };
-      }
-
+      const hasAnyData = Object.keys(fetchedData).length > 0;
       const nowTime = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
       syncStatus.isFetching = false;
       syncStatus.lastFetchedAt = nowTime;
       syncStatus.connected = true;
+      syncStatus.successMessage = `Supabase live synchronization active (${nowTime} IST)`;
       notifyListeners();
 
       return {
         success: true,
-        data: null,
-        message: 'Supabase connected hai.',
+        data: hasAnyData ? fetchedData : null,
+        message: hasAnyData
+          ? 'Supabase se live data successfully load ho gaya.'
+          : 'Supabase connected hai.',
       };
     } catch (err: any) {
       console.warn('Supabase fetch error:', err);

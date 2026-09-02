@@ -207,6 +207,7 @@ export class GSTStorage {
 
   static saveUsers(users: User[]) {
     safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    SupabaseService.syncUsers(users).catch((e) => console.warn('Supabase sync users error:', e));
   }
 
   static getClients(): Client[] {
@@ -283,7 +284,7 @@ export class GSTStorage {
     if (syncRemote) {
       CloudService.batchSyncMonthlyWorkToCloud(work).catch((e) => console.warn('Cloud sync monthly work error:', e));
       if (work.length > 0) {
-        SupabaseService.syncMonthlyWork(work[work.length - 1]).catch((e) => console.warn('Supabase sync monthly work error:', e));
+        SupabaseService.syncMonthlyWorkBatch(work).catch((e) => console.warn('Supabase sync monthly work batch error:', e));
       }
     }
   }
@@ -2042,6 +2043,7 @@ export class GSTStorage {
 
   static saveOfficeVisits(visits: OfficeVisit[]) {
     safeSetItem(STORAGE_KEYS.OFFICE_VISITS, JSON.stringify(visits));
+    SupabaseService.syncOfficeVisitsBatch(visits).catch((e) => console.warn('Supabase sync office visits error:', e));
   }
 
   static saveOfficeVisitsLocally(visits: OfficeVisit[]) {
