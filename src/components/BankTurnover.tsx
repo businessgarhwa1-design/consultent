@@ -136,15 +136,18 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     return clients.find((c) => c.id === selectedClientId) || clients[0];
   }, [clients, selectedClientId]);
 
-  // Search filtered clients
+  // Search filtered clients (including by File No, firm name, GSTIN, client name, mobile)
   const filteredClients = useMemo(() => {
     if (!clientSearch.trim()) return clients;
-    const q = clientSearch.toLowerCase();
+    const q = clientSearch.toLowerCase().trim();
     return clients.filter(
       (c) =>
+        (c.file_no && c.file_no.toLowerCase().includes(q)) ||
         c.firm_name.toLowerCase().includes(q) ||
         c.gstin.toLowerCase().includes(q) ||
-        c.client_name.toLowerCase().includes(q)
+        c.client_name.toLowerCase().includes(q) ||
+        (c.mobile && c.mobile.includes(q)) ||
+        (c.alternate_mobile && c.alternate_mobile.includes(q))
     );
   }, [clients, clientSearch]);
 
@@ -508,47 +511,61 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input
+                id="bank-turnover-client-search"
                 type="text"
                 value={clientSearch}
                 onChange={(e) => setClientSearch(e.target.value)}
-                placeholder="Search firm, GSTIN, name..."
+                placeholder="Search by File No, firm, GSTIN, name, mobile..."
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:bg-white focus:outline-hidden focus:border-blue-500"
               />
             </div>
 
             {/* Clients List */}
             <div className="max-h-[360px] overflow-y-auto space-y-1.5 pr-1">
-              {filteredClients.map((c) => {
-                const isSelected = c.id === selectedClientId;
-                const summary = GSTStorage.getClientBankTurnoverSummary(c.id, selectedFY.id);
+              {filteredClients.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  No clients match "{clientSearch}"
+                </div>
+              ) : (
+                filteredClients.map((c) => {
+                  const isSelected = c.id === selectedClientId;
+                  const summary = GSTStorage.getClientBankTurnoverSummary(c.id, selectedFY.id);
 
-                return (
-                  <div
-                    key={c.id}
-                    id={`bank-client-item-${c.id}`}
-                    onClick={() => setSelectedClientId(c.id)}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-blue-50/80 border-blue-300 shadow-xs'
-                        : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/70'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-1">
-                      <div className="font-bold text-slate-900 text-xs truncate">{c.firm_name}</div>
-                      <span className="text-[10px] font-mono bg-white border border-slate-200 px-1.5 py-0.2 rounded font-bold text-slate-700 shrink-0">
-                        {c.gstin.substring(0, 7)}...
-                      </span>
-                    </div>
+                  return (
+                    <div
+                      key={c.id}
+                      id={`bank-client-item-${c.id}`}
+                      onClick={() => setSelectedClientId(c.id)}
+                      className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-50/80 border-blue-300 shadow-xs'
+                          : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/70'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <div className="font-bold text-slate-900 text-xs truncate">{c.firm_name}</div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {c.file_no && (
+                            <span className="text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded font-bold">
+                              #{c.file_no}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-mono bg-white border border-slate-200 px-1.5 py-0.2 rounded font-bold text-slate-700">
+                            {c.gstin.substring(0, 7)}...
+                          </span>
+                        </div>
+                      </div>
 
-                    <div className="flex items-center justify-between mt-1.5 text-[11px]">
-                      <span className="text-slate-500">{summary.accountCount} Bank Account(s)</span>
-                      <span className="font-bold text-slate-900">
-                        {summary.grandTotal > 0 ? formatINR(summary.grandTotal) : '₹0'}
-                      </span>
+                      <div className="flex items-center justify-between mt-1.5 text-[11px]">
+                        <span className="text-slate-500">{summary.accountCount} Bank Account(s)</span>
+                        <span className="font-bold text-slate-900">
+                          {summary.grandTotal > 0 ? formatINR(summary.grandTotal) : '₹0'}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -557,9 +574,16 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
             <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 shadow-sm space-y-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
-                    Active Client Details
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
+                      Active Client Details
+                    </span>
+                    {selectedClient.file_no && (
+                      <span className="text-[10px] font-mono bg-blue-900/80 text-blue-300 border border-blue-600/60 px-1.5 py-0.2 rounded font-bold">
+                        File #{selectedClient.file_no}
+                      </span>
+                    )}
+                  </div>
                   <h3 className="font-bold text-sm text-white mt-0.5">{selectedClient.firm_name}</h3>
                   <div className="font-mono text-xs font-semibold text-slate-300 mt-1">
                     GSTIN: {selectedClient.gstin}
