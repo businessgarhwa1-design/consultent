@@ -1355,9 +1355,63 @@ export class GSTStorage {
     SupabaseService.syncBankAccounts(accounts).catch((e) => console.warn('Supabase sync bank accounts error:', e));
   }
 
-  static getClientBankAccounts(clientId: number): ClientBankAccount[] {
+  static getClientBankAccounts(clientId: number, fyId?: number): ClientBankAccount[] {
     const all = this.getBankAccounts();
-    return all.filter((a) => a.client_id === clientId).sort((a, b) => a.slot_number - b.slot_number);
+    const clientAccounts = all.filter((a) => a.client_id === clientId);
+
+    if (!fyId) {
+      // Return active accounts (or all unique slots)
+      return clientAccounts.sort((a, b) => a.slot_number - b.slot_number);
+    }
+
+    const fys = this.getFinancialYears();
+    const currentFY = fys.find((f) => f.id === fyId);
+    const targetStartYear = currentFY ? currentFY.start_year : null;
+
+    // Filter accounts visible in the requested FY
+    const visibleAccounts = clientAccounts.filter((acc) => {
+      // 1. If active, it is persistent and visible across all Financial Years
+      if (acc.status === 'active') {
+        return true;
+      }
+
+      // 2. If deactivated, check if it was deactivated in this FY or later (historical retention)
+      if (acc.status === 'inactive') {
+        if (targetStartYear !== null && acc.deactivated_fy_start_year !== undefined && acc.deactivated_fy_start_year !== null) {
+          // Visible in and before the FY it was deactivated in
+          return targetStartYear <= acc.deactivated_fy_start_year;
+        }
+        if (acc.deactivated_in_fy_id !== undefined && acc.deactivated_in_fy_id !== null) {
+          const deactFY = fys.find((f) => f.id === acc.deactivated_in_fy_id);
+          if (deactFY && targetStartYear !== null) {
+            return targetStartYear <= deactFY.start_year;
+          }
+          return acc.deactivated_in_fy_id === fyId;
+        }
+        // If inactive without FY metadata, keep visible if it has recorded turnover in this FY
+        const turnovers = this.getClientBankTurnover(clientId, fyId);
+        const hasTurnoverInThisFY = turnovers.some((t) => t.bank_account_id === acc.id && t.turnover_amount > 0);
+        return hasTurnoverInThisFY;
+      }
+
+      return true;
+    });
+
+    // In case multiple accounts exist for the same slot (e.g. historical replaced by new active),
+    // pick the best matching account for this FY: active takes priority, or the most recent applicable.
+    const slotMap = new Map<number, ClientBankAccount>();
+    visibleAccounts.forEach((acc) => {
+      const existing = slotMap.get(acc.slot_number);
+      if (!existing) {
+        slotMap.set(acc.slot_number, acc);
+      } else {
+        if (acc.status === 'active' && existing.status !== 'active') {
+          slotMap.set(acc.slot_number, acc);
+        }
+      }
+    });
+
+    return Array.from(slotMap.values()).sort((a, b) => a.slot_number - b.slot_number);
   }
 
   static saveClientBankAccount(accountData: {
@@ -1369,21 +1423,45 @@ export class GSTStorage {
     account_type: ClientBankAccount['account_type'];
     ifsc: string;
     status: ClientBankAccount['status'];
+    current_fy_id?: number;
   }): ClientBankAccount {
     const all = this.getBankAccounts();
     const existingIndex = all.findIndex(
       (a) => a.client_id === accountData.client_id && a.slot_number === accountData.slot_number
     );
     const now = getISTTimestamp();
+    const fys = this.getFinancialYears();
+    const currentFY = accountData.current_fy_id ? fys.find((f) => f.id === accountData.current_fy_id) : null;
 
     let savedAccount: ClientBankAccount;
     let isEdit = existingIndex >= 0;
     const previousAccount = isEdit ? { ...all[existingIndex] } : null;
 
+    // Track deactivation financial year when marked inactive
+    let deactId: number | null = previousAccount?.deactivated_in_fy_id ?? null;
+    let deactStartYear: number | null = previousAccount?.deactivated_fy_start_year ?? null;
+    let deactFyName: string | null = previousAccount?.deactivated_fy_name ?? null;
+
+    if (accountData.status === 'inactive') {
+      if (!deactId && currentFY) {
+        deactId = currentFY.id;
+        deactStartYear = currentFY.start_year;
+        deactFyName = currentFY.display_name;
+      }
+    } else {
+      // Reactivated to 'active' -> clear deactivation metadata so it continues across all FYs
+      deactId = null;
+      deactStartYear = null;
+      deactFyName = null;
+    }
+
     if (existingIndex >= 0) {
       savedAccount = {
         ...all[existingIndex],
         ...accountData,
+        deactivated_in_fy_id: deactId,
+        deactivated_fy_start_year: deactStartYear,
+        deactivated_fy_name: deactFyName,
         updated_at: now,
       };
       all[existingIndex] = savedAccount;
@@ -1391,6 +1469,9 @@ export class GSTStorage {
       savedAccount = {
         id: Date.now() + Math.floor(Math.random() * 1000),
         ...accountData,
+        deactivated_in_fy_id: deactId,
+        deactivated_fy_start_year: deactStartYear,
+        deactivated_fy_name: deactFyName,
         created_at: now,
         updated_at: now,
       };
@@ -1411,7 +1492,7 @@ export class GSTStorage {
         recordId: savedAccount.id,
         oldValues: previousAccount ? sanitizeAuditValues(previousAccount) : null,
         newValues: sanitizeAuditValues(savedAccount),
-        description: `${isEdit ? 'Updated' : 'Configured'} Bank Account #${accountData.slot_number}: ${accountData.bank_name} (A/C: ${accountData.account_number})`,
+        description: `${isEdit ? 'Updated' : 'Configured'} Bank Account #${accountData.slot_number}: ${accountData.bank_name} (A/C: ${accountData.account_number}, Status: ${savedAccount.status})`,
       }
     );
 
@@ -1666,7 +1747,7 @@ export class GSTStorage {
     accounts: ClientBankAccount[];
     accountTotals: Record<number, number>;
   } {
-    const accounts = this.getClientBankAccounts(clientId);
+    const accounts = this.getClientBankAccounts(clientId, fyId);
     const turnovers = this.getClientBankTurnover(clientId, fyId);
 
     const accountTotals: Record<number, number> = {};
@@ -1896,7 +1977,7 @@ export class GSTStorage {
     });
 
     // 2. Bank Accounts (Up to 5 slots)
-    const bankAccountsList = this.getClientBankAccounts(clientId);
+    const bankAccountsList = this.getClientBankAccounts(clientId, fyId);
     const bankTurnovers = this.getClientBankTurnover(clientId, fyId);
 
     const slotNumbers: BankAccountSlot[] = [1, 2, 3, 4, 5];

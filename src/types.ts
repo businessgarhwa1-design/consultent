@@ -307,6 +307,9 @@ export interface ClientBankAccount {
   account_type: BankAccountType;
   ifsc: string;
   status: BankAccountStatus;
+  deactivated_in_fy_id?: number | null;
+  deactivated_fy_start_year?: number | null;
+  deactivated_fy_name?: string | null;
   created_at: string;
   updated_at: string;
 }

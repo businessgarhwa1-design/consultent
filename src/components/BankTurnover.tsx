@@ -99,7 +99,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
   // Load data whenever selected client or FY changes
   const loadData = () => {
     if (!selectedClientId) return;
-    const accounts = GSTStorage.getClientBankAccounts(selectedClientId);
+    const accounts = GSTStorage.getClientBankAccounts(selectedClientId, selectedFY.id);
     const turnovers = GSTStorage.getClientBankTurnover(selectedClientId, selectedFY.id);
     const backups = GSTStorage.getClientBankStatements(selectedClientId, selectedFY.id);
 
@@ -287,6 +287,7 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
       account_type: slotForm.account_type,
       ifsc: slotForm.ifsc.trim().toUpperCase(),
       status: slotForm.status,
+      current_fy_id: selectedFY.id,
     });
 
     setEditingSlotConfig(null);
@@ -862,6 +863,15 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
                           {account.ifsc && (
                             <span className="text-[10px] font-mono font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded">
                               {account.ifsc}
+                            </span>
+                          )}
+                          {account.status === 'inactive' ? (
+                            <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">
+                              Deactivated {account.deactivated_fy_name ? `(${account.deactivated_fy_name})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
+                              Active
                             </span>
                           )}
                         </div>
