@@ -575,7 +575,7 @@ export const generateAllClientsReportPDF = (
 
     // Bank Table
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
     doc.text('Bank Turnover (5 Accounts)', 14, clientY);
     clientY += 3;
