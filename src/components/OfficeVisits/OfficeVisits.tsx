@@ -35,6 +35,7 @@ import {
   AppSettings,
   FY_MONTHS,
 } from '../../types';
+import { GSTStorage } from '../../utils/storage';
 import { NewVisitModal } from './NewVisitModal';
 import { MarkOutModal } from './MarkOutModal';
 import { AddVisitNoteModal } from './AddVisitNoteModal';
@@ -388,11 +389,13 @@ export const OfficeVisits: React.FC<OfficeVisitsProps> = ({
               }}
               className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer"
             >
-              {financialYears.map((fy) => (
-                <option key={fy.id} value={fy.id}>
-                  FY {fy.display_name}
-                </option>
-              ))}
+              {[...financialYears]
+                .sort((a, b) => (GSTStorage.getFYSortOrder() === 'desc' ? b.start_year - a.start_year : a.start_year - b.start_year))
+                .map((fy) => (
+                  <option key={fy.id} value={fy.id}>
+                    FY {fy.display_name}
+                  </option>
+                ))}
             </select>
           </div>
 

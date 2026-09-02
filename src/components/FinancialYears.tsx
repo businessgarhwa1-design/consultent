@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FinancialYear, MonthlyWork } from '../types';
-import { Calendar, Plus, CheckCircle2, ShieldCheck, Database, Layers } from 'lucide-react';
+import { Calendar, Plus, CheckCircle2, ShieldCheck, Database, Layers, ArrowUpDown, Search, Filter } from 'lucide-react';
 
 interface FinancialYearsProps {
   financialYears: FinancialYear[];
@@ -8,6 +8,8 @@ interface FinancialYearsProps {
   onSelectFY: (fy: FinancialYear) => void;
   onAddFY: (startYear: number) => { success: boolean; error?: string };
   monthlyWork: MonthlyWork[];
+  fySortOrder?: 'asc' | 'desc';
+  onToggleFYSortOrder?: () => void;
 }
 
 export const FinancialYears: React.FC<FinancialYearsProps> = ({
@@ -16,11 +18,15 @@ export const FinancialYears: React.FC<FinancialYearsProps> = ({
   onSelectFY,
   onAddFY,
   monthlyWork,
+  fySortOrder = 'asc',
+  onToggleFYSortOrder,
 }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [startYear, setStartYear] = useState(2027);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [localSortOrder, setLocalSortOrder] = useState<'asc' | 'desc'>(fySortOrder);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +41,31 @@ export const FinancialYears: React.FC<FinancialYearsProps> = ({
       setShowAddForm(false);
     }
   };
+
+  const handleToggleSort = () => {
+    if (onToggleFYSortOrder) {
+      onToggleFYSortOrder();
+    }
+    setLocalSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+  };
+
+  const effectiveOrder = onToggleFYSortOrder ? fySortOrder : localSortOrder;
+
+  const sortedAndFilteredFYs = useMemo(() => {
+    let list = [...financialYears];
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      list = list.filter(
+        (f) =>
+          f.display_name.toLowerCase().includes(q) ||
+          String(f.start_year).includes(q) ||
+          String(f.end_year).includes(q)
+      );
+    }
+    return list.sort((a, b) =>
+      effectiveOrder === 'desc' ? b.start_year - a.start_year : a.start_year - b.start_year
+    );
+  }, [financialYears, searchTerm, effectiveOrder]);
 
   return (
     <div className="space-y-6">
@@ -131,9 +162,55 @@ export const FinancialYears: React.FC<FinancialYearsProps> = ({
         </div>
       )}
 
+      {/* Filter and Sorting Toolbar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search Financial Year (e.g. 2025-26, 2026)..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 pl-9 pr-8 py-2 rounded-xl text-xs font-bold text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+          />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs font-bold"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Ascending / Descending Order Toggle Button */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-600">Sort Order:</span>
+          <button
+            type="button"
+            id="fy-page-sort-order-toggle-btn"
+            onClick={handleToggleSort}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 shadow-2xs transition-all cursor-pointer"
+            title="Toggle Financial Years Ascending / Descending Order"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5 text-blue-600" />
+            <span>
+              {effectiveOrder === 'desc'
+                ? 'Descending (2056 → 2024)'
+                : 'Ascending (2024 → 2056)'}
+            </span>
+          </button>
+
+          <span className="text-xs font-semibold text-slate-500">
+            ({sortedAndFilteredFYs.length} FYs)
+          </span>
+        </div>
+      </div>
+
       {/* FY Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {financialYears.map((fy) => {
+        {sortedAndFilteredFYs.map((fy) => {
           const isCurrentSelected = fy.id === selectedFY.id;
           const fyRecordsCount = monthlyWork.filter((m) => m.financial_year_id === fy.id).length;
           const fyCompletedCount = monthlyWork.filter(

@@ -42,6 +42,7 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>(() => GSTStorage.getClients());
   const [financialYears, setFinancialYears] = useState<FinancialYear[]>(() => GSTStorage.getFinancialYears());
   const [selectedFY, setSelectedFY] = useState<FinancialYear | null>(() => GSTStorage.getSelectedFY());
+  const [fySortOrder, setFySortOrder] = useState<'asc' | 'desc'>(() => GSTStorage.getFYSortOrder());
   const [selectedMonth, setSelectedMonth] = useState<string>(() => GSTStorage.getSelectedMonth());
   const [monthlyWork, setMonthlyWork] = useState<MonthlyWorkType[]>(() => GSTStorage.getMonthlyWork());
   const [workHistory, setWorkHistory] = useState<WorkHistory[]>(() => GSTStorage.getWorkHistory());
@@ -227,6 +228,16 @@ export default function App() {
     setSelectedFY(fy);
     GSTStorage.setSelectedFY(fy);
     showToast(`Switched to Financial Year ${fy.display_name}`, 'info');
+  };
+
+  const handleToggleFYSortOrder = () => {
+    const next = fySortOrder === 'asc' ? 'desc' : 'asc';
+    setFySortOrder(next);
+    GSTStorage.setFYSortOrder(next);
+    showToast(
+      `Financial Years sorted in ${next === 'asc' ? 'Ascending (2024 → 2056)' : 'Descending (2056 → 2024)'} order`,
+      'info'
+    );
   };
 
   const handleSelectMonth = (month: string) => {
@@ -674,6 +685,8 @@ export default function App() {
         financialYears={financialYears}
         selectedFY={selectedFY}
         onSelectFY={handleSelectFY}
+        fySortOrder={fySortOrder}
+        onToggleFYSortOrder={handleToggleFYSortOrder}
         selectedMonth={selectedMonth}
         onSelectMonth={handleSelectMonth}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -828,6 +841,8 @@ export default function App() {
               financialYears={financialYears}
               selectedFY={selectedFY}
               onSelectFY={handleSelectFY}
+              fySortOrder={fySortOrder}
+              onToggleFYSortOrder={handleToggleFYSortOrder}
               selectedMonth={selectedMonth}
               onSelectMonth={handleSelectMonth}
               users={users}
@@ -889,6 +904,8 @@ export default function App() {
                 onSelectFY={handleSelectFY}
                 onAddFY={handleAddFinancialYear}
                 monthlyWork={monthlyWork}
+                fySortOrder={fySortOrder}
+                onToggleFYSortOrder={handleToggleFYSortOrder}
               />
             ) : (
               <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center space-y-3">

@@ -728,11 +728,13 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
                 }}
                 className="bg-transparent font-black text-slate-900 focus:outline-none cursor-pointer"
               >
-                {financialYears.map((fy) => (
-                  <option key={fy.id} value={fy.id}>
-                    {fy.display_name} {fy.is_active ? '(Active)' : ''}
-                  </option>
-                ))}
+                {[...financialYears]
+                  .sort((a, b) => (GSTStorage.getFYSortOrder() === 'desc' ? b.start_year - a.start_year : a.start_year - b.start_year))
+                  .map((fy) => (
+                    <option key={fy.id} value={fy.id}>
+                      FY {fy.display_name} {fy.id === selectedFY.id ? '(Active)' : ''}
+                    </option>
+                  ))}
               </select>
             </div>
 

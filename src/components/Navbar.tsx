@@ -13,7 +13,10 @@ import {
   ChevronDown,
   RefreshCw,
   Sparkles,
-  Radio
+  Radio,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -24,6 +27,8 @@ interface NavbarProps {
   financialYears: FinancialYear[];
   selectedFY: FinancialYear;
   onSelectFY: (fy: FinancialYear) => void;
+  fySortOrder?: 'asc' | 'desc';
+  onToggleFYSortOrder?: () => void;
   selectedMonth: string;
   onSelectMonth: (month: string) => void;
   onToggleSidebar: () => void;
@@ -113,6 +118,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   financialYears,
   selectedFY,
   onSelectFY,
+  fySortOrder = 'asc',
+  onToggleFYSortOrder,
   selectedMonth,
   onSelectMonth,
   onToggleSidebar,
@@ -233,10 +240,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Active Work FY Selector */}
-          <div className="flex items-center bg-blue-50/90 border border-blue-200 rounded-xl px-2 sm:px-2.5 py-1 text-xs shadow-2xs">
-            <Calendar className="w-3.5 h-3.5 text-blue-600 mr-1 sm:mr-1.5 shrink-0" />
-            <span className="font-bold text-blue-950 mr-1 text-[11px] hidden md:inline">Work FY:</span>
+          {/* Active Work FY Selector with Ascending / Descending Order Option */}
+          <div className="flex items-center bg-blue-50/90 border border-blue-200 rounded-xl px-2 sm:px-2.5 py-1 text-xs shadow-2xs gap-1">
+            <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span className="font-bold text-blue-950 mr-0.5 text-[11px] hidden md:inline">Work FY:</span>
             <select
               id="global-fy-selector"
               value={selectedFY.id}
@@ -244,15 +251,35 @@ export const Navbar: React.FC<NavbarProps> = ({
                 const found = financialYears.find((f) => f.id === Number(e.target.value));
                 if (found) onSelectFY(found);
               }}
-              className="bg-transparent font-bold text-blue-800 focus:outline-none cursor-pointer pr-1 text-xs"
-              title="Select Active Financial Year to View/Edit Records"
+              className="bg-transparent font-black text-blue-900 focus:outline-none cursor-pointer pr-1 text-xs"
+              title="Select Active Financial Year (e.g. FY 2025-26)"
             >
-              {financialYears.map((fy) => (
-                <option key={fy.id} value={fy.id}>
-                  {fy.display_name}
-                </option>
-              ))}
+              {[...financialYears]
+                .sort((a, b) => (fySortOrder === 'desc' ? b.start_year - a.start_year : a.start_year - b.start_year))
+                .map((fy) => (
+                  <option key={fy.id} value={fy.id}>
+                    FY {fy.display_name}
+                  </option>
+                ))}
             </select>
+
+            {/* Ascending / Descending Toggle Button */}
+            {onToggleFYSortOrder && (
+              <button
+                type="button"
+                id="global-fy-sort-order-toggle-btn"
+                onClick={onToggleFYSortOrder}
+                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-blue-100 hover:bg-blue-200 text-blue-800 transition-all cursor-pointer"
+                title={
+                  fySortOrder === 'desc'
+                    ? 'Years Order: Descending (2056 → 2024). Click for Ascending (2024 → 2056)'
+                    : 'Years Order: Ascending (2024 → 2056). Click for Descending (2056 → 2024)'
+                }
+              >
+                <span>{fySortOrder === 'desc' ? 'DESC' : 'ASC'}</span>
+                <ArrowUpDown className="w-2.5 h-2.5 shrink-0" />
+              </button>
+            )}
           </div>
 
           {/* Active Work Month Selector */}

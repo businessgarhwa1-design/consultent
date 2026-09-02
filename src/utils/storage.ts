@@ -92,6 +92,7 @@ const STORAGE_KEYS = {
   CURRENT_USER_DATA: 'gst_app_current_user_data_v1',
   ACTIVE_TAB: 'gst_app_active_tab_v1',
   SELECTED_FY_ID: 'gst_app_selected_fy_id',
+  FY_SORT_ORDER: 'gst_app_fy_sort_order_v1',
   SELECTED_MONTH: 'gst_app_selected_month',
   BANK_ACCOUNTS: 'gst_app_bank_accounts_v1',
   BANK_TURNOVER: 'gst_app_bank_turnover_v1',
@@ -954,11 +955,30 @@ export class GSTStorage {
       const found = fys.find((f) => f.id === Number(storedId));
       if (found) return found;
     }
-    return fys[1] || fys[0]; // 2026-27 by default
+    // Default to FY 2025-26 if available, otherwise first FY
+    const fy2025 = fys.find((f) => f.display_name === '2025-26' || f.start_year === 2025);
+    return fy2025 || fys[1] || fys[0];
   }
 
   static setSelectedFY(fy: FinancialYear) {
     safeSetItem(STORAGE_KEYS.SELECTED_FY_ID, String(fy.id));
+  }
+
+  static getFYSortOrder(): 'asc' | 'desc' {
+    const raw = safeGetItem(STORAGE_KEYS.FY_SORT_ORDER);
+    return raw === 'desc' ? 'desc' : 'asc';
+  }
+
+  static setFYSortOrder(order: 'asc' | 'desc') {
+    safeSetItem(STORAGE_KEYS.FY_SORT_ORDER, order);
+  }
+
+  static getSortedFinancialYears(fys: FinancialYear[], order: 'asc' | 'desc' = 'asc'): FinancialYear[] {
+    const list = [...fys];
+    if (order === 'desc') {
+      return list.sort((a, b) => b.start_year - a.start_year);
+    }
+    return list.sort((a, b) => a.start_year - b.start_year);
   }
 
   static getSelectedMonth(): string {
