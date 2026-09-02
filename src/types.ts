@@ -353,8 +353,11 @@ export interface BankAccountTurnoverSummary {
 export interface ClientGstTurnover {
   id: number;
   client_id: number;
+  client_type?: string; // 'Normal' | 'Composition' | 'QRMP'
   financial_year_id: number;
+  financial_year?: string; // e.g. "2025-2026", "2026-2027"
   month: string; // "April", "May", ... "March"
+  entry_date?: string; // Entry date / timestamp
   taxable_turnover: number;
   exempt_turnover: number;
   total_gst_turnover: number; // taxable_turnover + exempt_turnover

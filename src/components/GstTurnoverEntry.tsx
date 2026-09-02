@@ -7,6 +7,7 @@ import {
   ClientGstTurnover,
 } from '../types';
 import { GSTStorage } from '../utils/storage';
+import { SupabaseService } from '../utils/supabaseService';
 import {
   Calculator,
   Building,
@@ -91,6 +92,17 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
 
   useEffect(() => {
     refreshTurnoverData();
+    // Fetch live master GST Turnover from Supabase and merge safely
+    SupabaseService.fetchGstTurnoverFromSupabase()
+      .then((records) => {
+        if (records && records.length > 0) {
+          const currentLocal = GSTStorage.getGstTurnover();
+          const merged = GSTStorage.mergeGstTurnoverLists(currentLocal, records);
+          GSTStorage.saveGstTurnoverLocally(merged);
+          setAllGstTurnovers(merged);
+        }
+      })
+      .catch((e) => console.warn('Supabase fetch GST turnover notice:', e));
   }, [selectedFY.id]);
 
   // Active client object
@@ -191,7 +203,7 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
 
     setMonthlyInputs(inputs);
     setSaveStatus(null);
-  }, [activeClient?.id, selectedFY.id]);
+  }, [activeClient?.id, selectedFY.id, allGstTurnovers]);
 
   // Handle month field change
   const handleInputChange = (month: string, field: 'taxable' | 'exempt' | 'remark', value: string) => {
@@ -254,9 +266,10 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
   }, [monthlyInputs]);
 
   // Save 12-month data for active client
-  const handleSaveClientTurnover = () => {
+  const handleSaveClientTurnover = async () => {
     if (!activeClient) return;
     setIsSaving(true);
+    setSaveStatus(null);
 
     const monthlyData: Record<string, { taxable: number; exempt: number; remark?: string }> = {};
 
@@ -267,7 +280,7 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
       monthlyData[m] = { taxable: tax, exempt: ex, remark: rem };
     });
 
-    GSTStorage.batchSaveClientGstTurnover(
+    const result = await GSTStorage.asyncBatchSaveClientGstTurnover(
       activeClient.id,
       selectedFY.id,
       monthlyData
@@ -278,8 +291,13 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
     if (onRefresh) onRefresh();
 
     setIsSaving(false);
-    const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    setSaveStatus(`12-Month GST Turnover saved successfully at ${nowTime}!`);
+    const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    if (result.success) {
+      setSaveStatus(`12-Month GST Turnover saved & synced to Supabase at ${nowTime}!`);
+    } else {
+      setSaveStatus(`Saved locally. Supabase note: ${result.error || 'Local cache updated'}`);
+    }
 
     // Log Activity
     GSTStorage.logActivity(
@@ -298,7 +316,7 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
 
     setTimeout(() => {
       setSaveStatus(null);
-    }, 4000);
+    }, 4500);
   };
 
   // Quick Action: Copy to remaining months

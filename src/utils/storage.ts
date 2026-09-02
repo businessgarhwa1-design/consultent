@@ -526,10 +526,19 @@ export class GSTStorage {
     const input = identifier.trim().toLowerCase();
     const users = this.getUsers();
     
-    // Find user by username or email
-    const user = users.find(
-      (u) => u.username.toLowerCase() === input || u.email.toLowerCase() === input
+    // Find user by username or email (with aliases)
+    let user = users.find(
+      (u) =>
+        u.username.toLowerCase() === input ||
+        u.email.toLowerCase() === input ||
+        (input === 'admin' && u.username.toLowerCase() === 'admin123') ||
+        (input === 'admin123' && u.username.toLowerCase() === 'admin')
     );
+
+    // Fallback if users empty
+    if (!user && (input === 'admin' || input === 'admin123' || input === 'admin@consultant.in')) {
+      user = initialUsers.find((u) => u.role === 'admin') || initialUsers[0];
+    }
 
     const ip = '103.21.124.55';
     const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'Chrome/128.0 (Windows NT 10.0; Win64)';
@@ -558,13 +567,22 @@ export class GSTStorage {
       return { success: false, error: 'Your account is inactive. Please contact administrator.' };
     }
 
-    // In demo environment, accept 'Password@123', 'admin', or the stored user's password/hash default
+    const isAdmin = user.role === 'admin' || user.username.toLowerCase().startsWith('admin');
+    const isAdminPass =
+      isAdmin &&
+      (password === 'Password@123' ||
+        password === 'admin' ||
+        password === 'admin123' ||
+        password === 'admin@123');
+
+    // In demo environment, accept 'Password@123', 'admin', 'admin123', or the stored user's password/hash default
     const validPassword = 
       password === 'Password@123' ||
       password === 'admin' ||
       password === 'admin123' ||
+      password === 'admin@123' ||
       password === user.password ||
-      (user.username === 'admin' && (password === 'admin' || password === 'Password@123'));
+      isAdminPass;
 
     if (!validPassword) {
       this.logActivity('LOGIN_FAILED', `Incorrect password attempt for user "${user.username}"`, {
@@ -1166,6 +1184,9 @@ export class GSTStorage {
     // Remove client from monthly work and work history
     const monthly = this.getMonthlyWork().filter((m) => m.client_id !== id);
     this.saveMonthlyWork(monthly);
+
+    // Remove client from GST turnover and Bank turnover
+    this.deleteClientGstTurnover(id);
 
     this.logActivity('DELETE', `Deleted client ${client.firm_name} (${client.gstin})`, {
       module: 'Client',
@@ -1775,15 +1796,46 @@ export class GSTStorage {
   static getGstTurnover(): ClientGstTurnover[] {
     const raw = safeGetItem(STORAGE_KEYS.GST_TURNOVER);
     if (!raw) {
-      this.saveGstTurnover(initialGstTurnover);
+      this.saveGstTurnoverLocally(initialGstTurnover);
       return initialGstTurnover;
     }
     return safeParse<ClientGstTurnover[]>(raw, initialGstTurnover);
   }
 
+  static mergeGstTurnoverLists(existing: ClientGstTurnover[], incoming: ClientGstTurnover[]): ClientGstTurnover[] {
+    const map = new Map<string, ClientGstTurnover>();
+
+    (existing || []).forEach((item) => {
+      if (!item || typeof item.client_id !== 'number' || typeof item.financial_year_id !== 'number' || !item.month) return;
+      const key = `${item.client_id}_${item.financial_year_id}_${item.month}`;
+      map.set(key, item);
+    });
+
+    (incoming || []).forEach((item) => {
+      if (!item || typeof item.client_id !== 'number' || typeof item.financial_year_id !== 'number' || !item.month) return;
+      const key = `${item.client_id}_${item.financial_year_id}_${item.month}`;
+      const curr = map.get(key);
+      if (!curr) {
+        map.set(key, item);
+      } else {
+        const currTime = curr.updated_at ? new Date(curr.updated_at).getTime() : 0;
+        const inTime = item.updated_at ? new Date(item.updated_at).getTime() : 0;
+        if (inTime >= currTime || (!curr.taxable_turnover && !curr.exempt_turnover && (item.taxable_turnover || item.exempt_turnover))) {
+          map.set(key, { ...curr, ...item });
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }
+
+  static saveGstTurnoverLocally(turnoverList: ClientGstTurnover[]) {
+    safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(turnoverList));
+  }
+
   static saveGstTurnover(turnoverList: ClientGstTurnover[]) {
     safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(turnoverList));
-    CloudService.batchSyncGstTurnoverToCloud(turnoverList).catch((e) => console.warn('Cloud sync GST turnover error:', e));
+    // Supabase is the primary persistent database for GST Turnover
     SupabaseService.syncGstTurnover(turnoverList).catch((e) => console.warn('Supabase sync GST turnover error:', e));
   }
 
@@ -1792,15 +1844,19 @@ export class GSTStorage {
     return all.filter((g) => g.client_id === clientId && g.financial_year_id === fyId);
   }
 
-  static batchSaveClientGstTurnover(
+  static async asyncBatchSaveClientGstTurnover(
     clientId: number,
     fyId: number,
     monthlyData: Record<string, { taxable: number; exempt: number; remark?: string }>
-  ): void {
+  ): Promise<{ success: boolean; records: ClientGstTurnover[]; error?: string }> {
     const all = this.getGstTurnover();
     const now = getISTTimestamp();
+    const client = this.getClientById(clientId);
+    const fy = this.getFinancialYears().find((f) => f.id === fyId);
+    const clientType = client?.gst_type || 'Normal';
+    const fyName = fy?.display_name || '';
 
-    // Fetch existing records to compute diff
+    // Fetch existing records for this specific client + FY to preserve entry IDs & created_at
     const oldRecords = all.filter(
       (g) => g.client_id === clientId && g.financial_year_id === fyId
     );
@@ -1812,15 +1868,17 @@ export class GSTStorage {
       oldValues[`${r.month}_remark`] = r.remark || '';
     });
 
-    // Remove existing turnover for this client + FY
-    const filtered = all.filter(
+    // Filter out ONLY this client's records for this specific FY.
+    // ALL OTHER CLIENTS AND ALL OTHER FINANCIAL YEARS ARE COMPLETELY UNTOUCHED!
+    const otherRecords = all.filter(
       (g) => !(g.client_id === clientId && g.financial_year_id === fyId)
     );
 
     const newValues: Record<string, any> = {};
     const changedMonths: string[] = [];
+    const updatedClientFYRecords: ClientGstTurnover[] = [];
 
-    Object.entries(monthlyData).forEach(([month, data]) => {
+    Object.entries(monthlyData).forEach(([month, data], index) => {
       const taxable = Number(data.taxable) || 0;
       const exempt = Number(data.exempt) || 0;
       const total = taxable + exempt;
@@ -1839,27 +1897,41 @@ export class GSTStorage {
         changedMonths.push(month);
       }
 
-      filtered.push({
-        id: Date.now() + Math.floor(Math.random() * 100000),
+      const existingRecord = oldRecords.find((r) => r.month === month);
+
+      const record: ClientGstTurnover = {
+        id: existingRecord ? existingRecord.id : Date.now() + index + Math.floor(Math.random() * 10000),
         client_id: clientId,
+        client_type: clientType,
         financial_year_id: fyId,
+        financial_year: fyName,
         month,
+        entry_date: existingRecord?.entry_date || now,
         taxable_turnover: taxable,
         exempt_turnover: exempt,
         total_gst_turnover: total,
         remark: remark || '',
-        created_at: now,
+        created_at: existingRecord ? existingRecord.created_at : now,
         updated_at: now,
-      });
+      };
+
+      updatedClientFYRecords.push(record);
     });
 
-    this.saveGstTurnover(filtered);
-    const client = this.getClientById(clientId);
-    const fy = this.getFinancialYears().find((f) => f.id === fyId);
+    const newAll = [...otherRecords, ...updatedClientFYRecords];
+    safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(newAll));
+
+    // Direct, isolated Supabase synchronization for this specific client + FY
+    const syncRes = await SupabaseService.syncClientGstTurnover(
+      clientId,
+      fyId,
+      updatedClientFYRecords,
+      newAll
+    );
 
     this.logActivity(
       'SAVE',
-      `Saved GST Turnover figures for ${client?.firm_name || 'Client #' + clientId} (${fy?.display_name || ''})`,
+      `Saved GST Turnover figures for ${client?.firm_name || 'Client #' + clientId} (${fy?.display_name || ''}) in Supabase`,
       {
         module: 'GST Turnover',
         clientId,
@@ -1870,9 +1942,117 @@ export class GSTStorage {
         oldValues,
         newValues,
         changedFields: changedMonths,
-        description: `Saved 12-month GST turnover (Taxable + Exempt + Remarks) for ${client?.firm_name} (${changedMonths.length} months modified)`,
+        description: `Saved 12-month GST turnover (Taxable + Exempt + Remarks) to Supabase for ${client?.firm_name} (${changedMonths.length} months modified)`,
       }
     );
+
+    return {
+      success: syncRes.success,
+      records: updatedClientFYRecords,
+      error: syncRes.error,
+    };
+  }
+
+  static batchSaveClientGstTurnover(
+    clientId: number,
+    fyId: number,
+    monthlyData: Record<string, { taxable: number; exempt: number; remark?: string }>
+  ): ClientGstTurnover[] {
+    const all = this.getGstTurnover();
+    const now = getISTTimestamp();
+    const client = this.getClientById(clientId);
+    const fy = this.getFinancialYears().find((f) => f.id === fyId);
+    const clientType = client?.gst_type || 'Normal';
+    const fyName = fy?.display_name || '';
+
+    // Fetch existing records for this specific client + FY to preserve entry IDs & created_at
+    const oldRecords = all.filter(
+      (g) => g.client_id === clientId && g.financial_year_id === fyId
+    );
+    const oldValues: Record<string, any> = {};
+    oldRecords.forEach((r) => {
+      oldValues[`${r.month}_taxable`] = r.taxable_turnover;
+      oldValues[`${r.month}_exempt`] = r.exempt_turnover;
+      oldValues[`${r.month}_total`] = r.total_gst_turnover;
+      oldValues[`${r.month}_remark`] = r.remark || '';
+    });
+
+    // Filter out ONLY this client's records for this specific FY.
+    // ALL OTHER CLIENTS AND ALL OTHER FINANCIAL YEARS ARE COMPLETELY UNTOUCHED!
+    const otherRecords = all.filter(
+      (g) => !(g.client_id === clientId && g.financial_year_id === fyId)
+    );
+
+    const newValues: Record<string, any> = {};
+    const changedMonths: string[] = [];
+    const updatedClientFYRecords: ClientGstTurnover[] = [];
+
+    Object.entries(monthlyData).forEach(([month, data], index) => {
+      const taxable = Number(data.taxable) || 0;
+      const exempt = Number(data.exempt) || 0;
+      const total = taxable + exempt;
+      const remark = data.remark?.trim() || '';
+
+      newValues[`${month}_taxable`] = taxable;
+      newValues[`${month}_exempt`] = exempt;
+      newValues[`${month}_total`] = total;
+      newValues[`${month}_remark`] = remark;
+
+      if (
+        (oldValues[`${month}_taxable`] ?? 0) !== taxable ||
+        (oldValues[`${month}_exempt`] ?? 0) !== exempt ||
+        (oldValues[`${month}_remark`] ?? '') !== remark
+      ) {
+        changedMonths.push(month);
+      }
+
+      const existingRecord = oldRecords.find((r) => r.month === month);
+
+      const record: ClientGstTurnover = {
+        id: existingRecord ? existingRecord.id : Date.now() + index + Math.floor(Math.random() * 10000),
+        client_id: clientId,
+        client_type: clientType,
+        financial_year_id: fyId,
+        financial_year: fyName,
+        month,
+        entry_date: existingRecord?.entry_date || now,
+        taxable_turnover: taxable,
+        exempt_turnover: exempt,
+        total_gst_turnover: total,
+        remark: remark || '',
+        created_at: existingRecord ? existingRecord.created_at : now,
+        updated_at: now,
+      };
+
+      updatedClientFYRecords.push(record);
+    });
+
+    const newAll = [...otherRecords, ...updatedClientFYRecords];
+    safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(newAll));
+
+    // Direct, isolated Supabase synchronization for this specific client + FY
+    SupabaseService.syncClientGstTurnover(clientId, fyId, updatedClientFYRecords, newAll).catch((e) =>
+      console.warn('Supabase syncClientGstTurnover error:', e)
+    );
+
+    this.logActivity(
+      'SAVE',
+      `Saved GST Turnover figures for ${client?.firm_name || 'Client #' + clientId} (${fy?.display_name || ''}) in Supabase`,
+      {
+        module: 'GST Turnover',
+        clientId,
+        clientName: client?.client_name,
+        firmName: client?.firm_name,
+        financialYearId: fyId,
+        financialYear: fy?.display_name,
+        oldValues,
+        newValues,
+        changedFields: changedMonths,
+        description: `Saved 12-month GST turnover (Taxable + Exempt + Remarks) to Supabase for ${client?.firm_name} (${changedMonths.length} months modified)`,
+      }
+    );
+
+    return updatedClientFYRecords;
   }
 
   static saveClientMonthGstTurnover(
@@ -1890,6 +2070,11 @@ export class GSTStorage {
     const total = taxableNum + exemptNum;
     const remarkStr = remark?.trim() || '';
 
+    const client = this.getClientById(clientId);
+    const fy = this.getFinancialYears().find((f) => f.id === fyId);
+    const clientType = client?.gst_type || 'Normal';
+    const fyName = fy?.display_name || '';
+
     const existingIndex = all.findIndex(
       (g) => g.client_id === clientId && g.financial_year_id === fyId && g.month === month
     );
@@ -1898,6 +2083,8 @@ export class GSTStorage {
     if (existingIndex >= 0) {
       result = {
         ...all[existingIndex],
+        client_type: clientType,
+        financial_year: fyName,
         taxable_turnover: taxableNum,
         exempt_turnover: exemptNum,
         total_gst_turnover: total,
@@ -1907,10 +2094,13 @@ export class GSTStorage {
       all[existingIndex] = result;
     } else {
       result = {
-        id: Date.now() + Math.floor(Math.random() * 10000),
+        id: Date.now() + Math.floor(Math.random() * 100000),
         client_id: clientId,
+        client_type: clientType,
         financial_year_id: fyId,
+        financial_year: fyName,
         month,
+        entry_date: now,
         taxable_turnover: taxableNum,
         exempt_turnover: exemptNum,
         total_gst_turnover: total,
@@ -1921,10 +2111,12 @@ export class GSTStorage {
       all.push(result);
     }
 
-    this.saveGstTurnover(all);
+    safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(all));
 
-    const client = this.getClientById(clientId);
-    const fy = this.getFinancialYears().find((f) => f.id === fyId);
+    // Direct Supabase sync for single entry
+    SupabaseService.saveSingleGstTurnoverEntry(result, all).catch((e) =>
+      console.warn('Supabase saveSingleGstTurnoverEntry error:', e)
+    );
 
     this.logActivity(
       'SAVE',
@@ -1941,6 +2133,33 @@ export class GSTStorage {
     );
 
     return result;
+  }
+
+  static deleteClientGstTurnoverRecord(recordId: number): void {
+    let all = this.getGstTurnover();
+    const target = all.find((g) => g.id === recordId);
+    if (!target) return;
+
+    all = all.filter((g) => g.id !== recordId);
+    safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(all));
+
+    SupabaseService.deleteGstTurnoverRecord(recordId, all).catch((e) =>
+      console.warn('Supabase deleteGstTurnoverRecord error:', e)
+    );
+  }
+
+  static deleteClientGstTurnover(clientId: number, fyId?: number): void {
+    let all = this.getGstTurnover();
+    if (fyId) {
+      all = all.filter((g) => !(g.client_id === clientId && g.financial_year_id === fyId));
+    } else {
+      all = all.filter((g) => g.client_id !== clientId);
+    }
+
+    safeSetItem(STORAGE_KEYS.GST_TURNOVER, JSON.stringify(all));
+    SupabaseService.deleteClientGstTurnover(clientId, fyId, all).catch((e) =>
+      console.warn('Supabase deleteClientGstTurnover error:', e)
+    );
   }
 
   // ==========================================

@@ -133,7 +133,7 @@ export default function App() {
             GSTStorage.saveBankAccounts(res.data.bank_accounts);
           }
           if (Array.isArray(res.data.gst_turnover) && res.data.gst_turnover.length > 0) {
-            GSTStorage.saveGstTurnover(res.data.gst_turnover);
+            GSTStorage.saveGstTurnoverLocally(res.data.gst_turnover);
           }
           if (Array.isArray(res.data.bank_turnover) && res.data.bank_turnover.length > 0) {
             GSTStorage.saveBankTurnover(res.data.bank_turnover);

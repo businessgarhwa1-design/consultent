@@ -18,6 +18,7 @@ import {
   Layers,
   Percent,
   Search,
+  RefreshCw,
 } from 'lucide-react';
 
 interface GstTurnoverModalProps {
@@ -49,6 +50,7 @@ export const GstTurnoverModal: React.FC<GstTurnoverModalProps> = ({
   const [clientSearchQuery, setClientSearchQuery] = useState('');
   const [activeFYId, setActiveFYId] = useState<number>(selectedFY.id);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // 12-month inputs: { [month]: { taxable: string; exempt: string; remark: string } }
   const [monthlyInputs, setMonthlyInputs] = useState<
@@ -168,8 +170,10 @@ export const GstTurnoverModal: React.FC<GstTurnoverModalProps> = ({
   };
 
   // Save handler
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!activeClient) return;
+    setIsSaving(true);
+    setSaveStatus(null);
 
     const dataToSave: Record<string, { taxable: number; exempt: number; remark?: string }> = {};
     FY_MONTHS.forEach((m) => {
@@ -180,9 +184,15 @@ export const GstTurnoverModal: React.FC<GstTurnoverModalProps> = ({
       };
     });
 
-    GSTStorage.batchSaveClientGstTurnover(activeClient.id, activeFYId, dataToSave);
+    const result = await GSTStorage.asyncBatchSaveClientGstTurnover(activeClient.id, activeFYId, dataToSave);
+    setIsSaving(false);
 
-    setSaveStatus(`12-Month GST Turnover saved successfully for ${activeClient.firm_name}!`);
+    if (result.success) {
+      setSaveStatus(`12-Month GST Turnover saved & synced to Supabase for ${activeClient.firm_name}!`);
+    } else {
+      setSaveStatus(`Saved locally for ${activeClient.firm_name}.`);
+    }
+
     if (onSaved) {
       onSaved();
     }
@@ -643,10 +653,20 @@ export const GstTurnoverModal: React.FC<GstTurnoverModalProps> = ({
             <button
               type="button"
               onClick={handleSave}
-              className="flex items-center gap-1.5 px-5 py-2 bg-[#78350F] hover:bg-[#92400E] text-white font-bold rounded-xl text-xs shadow-md transition-colors cursor-pointer"
+              disabled={isSaving}
+              className="flex items-center gap-1.5 px-5 py-2 bg-[#78350F] hover:bg-[#92400E] text-white font-bold rounded-xl text-xs shadow-md transition-colors cursor-pointer disabled:opacity-50"
             >
-              <Save className="w-4 h-4" />
-              <span>Save 12-Month GST Turnover</span>
+              {isSaving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Saving to Supabase...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>Save 12-Month GST Turnover</span>
+                </>
+              )}
             </button>
           </div>
         </div>

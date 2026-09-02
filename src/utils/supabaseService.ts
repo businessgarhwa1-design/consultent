@@ -563,26 +563,444 @@ export class SupabaseService {
   }
 
   /**
-   * Sync GST Turnover to Supabase
+   * Sync GST Turnover to Supabase (Master sync)
    */
-  static async syncGstTurnover(turnoverList: ClientGstTurnover[]): Promise<void> {
+  static async syncGstTurnover(turnoverList: ClientGstTurnover[]): Promise<{ success: boolean; error?: string }> {
     try {
-      if (turnoverList.length === 0) return;
-      await Promise.allSettled([
-        supabase.from('gst_turnover').upsert(turnoverList, { onConflict: 'id' }),
+      if (!turnoverList || turnoverList.length === 0) return { success: true };
+      
+      const now = new Date().toISOString();
+      const cleanList = turnoverList.map((t) => ({
+        id: t.id,
+        client_id: t.client_id,
+        client_type: t.client_type || 'Normal',
+        financial_year_id: t.financial_year_id,
+        financial_year: t.financial_year || '',
+        month: t.month,
+        entry_date: t.entry_date || t.created_at || now,
+        taxable_turnover: Number(t.taxable_turnover) || 0,
+        exempt_turnover: Number(t.exempt_turnover) || 0,
+        total_gst_turnover: Number(t.total_gst_turnover) || (Number(t.taxable_turnover) || 0) + (Number(t.exempt_turnover) || 0),
+        remark: t.remark || '',
+        created_at: t.created_at || now,
+        updated_at: now,
+      }));
+
+      const results = await Promise.allSettled([
+        supabase.from('gst_turnover').upsert(cleanList, { onConflict: 'id' }),
         supabase.from('app_sync_store').upsert(
           {
             key: 'master_gst_turnover',
-            data: turnoverList,
-            updated_at: new Date().toISOString(),
+            data: cleanList,
+            updated_at: now,
           },
           { onConflict: 'key' }
         ),
       ]);
+
+      const tableRes = results[0];
+      const storeRes = results[1];
+
+      let anySuccess = false;
+      let errorMsg = '';
+
+      if (tableRes.status === 'fulfilled' && !tableRes.value.error) {
+        anySuccess = true;
+      } else if (tableRes.status === 'fulfilled' && tableRes.value.error) {
+        errorMsg += `Table: ${tableRes.value.error.message}. `;
+      }
+
+      if (storeRes.status === 'fulfilled' && !storeRes.value.error) {
+        anySuccess = true;
+      } else if (storeRes.status === 'fulfilled' && storeRes.value.error) {
+        errorMsg += `Store: ${storeRes.value.error.message}. `;
+      }
+
+      if (anySuccess) {
+        syncStatus.tablesStatus.gstTurnover = true;
+        syncStatus.lastSyncedAt = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+        notifyListeners();
+        return { success: true };
+      } else {
+        return { success: false, error: errorMsg || 'Failed to sync GST turnover' };
+      }
+    } catch (err: any) {
+      console.warn('Supabase syncGstTurnover error:', err);
+      return { success: false, error: err?.message || 'Sync exception' };
+    }
+  }
+
+  /**
+   * Sync specific Client's GST Turnover for a specific Financial Year
+   * Guarantees complete isolation: other clients and other FYs are untouched.
+   */
+  static async syncClientGstTurnover(
+    clientId: number,
+    fyId: number,
+    clientFyRecords: ClientGstTurnover[],
+    fullList?: ClientGstTurnover[]
+  ): Promise<{ success: boolean; count: number; error?: string }> {
+    try {
+      const now = new Date().toISOString();
+      const clientKey = `gst_turnover_client_${clientId}_fy_${fyId}`;
+
+      const cleanRecords = clientFyRecords.map((t) => ({
+        id: t.id,
+        client_id: clientId,
+        client_type: t.client_type || 'Normal',
+        financial_year_id: fyId,
+        financial_year: t.financial_year || '',
+        month: t.month,
+        entry_date: t.entry_date || t.created_at || now,
+        taxable_turnover: Number(t.taxable_turnover) || 0,
+        exempt_turnover: Number(t.exempt_turnover) || 0,
+        total_gst_turnover: Number(t.total_gst_turnover) || (Number(t.taxable_turnover) || 0) + (Number(t.exempt_turnover) || 0),
+        remark: t.remark || '',
+        created_at: t.created_at || now,
+        updated_at: now,
+      }));
+
+      const promises: PromiseLike<any>[] = [
+        // 1. Save specific client + FY key in key-value store (guaranteed atomic persistence)
+        supabase.from('app_sync_store').upsert(
+          {
+            key: clientKey,
+            data: cleanRecords,
+            updated_at: now,
+          },
+          { onConflict: 'key' }
+        ),
+      ];
+
+      // 2. Upsert rows into relational gst_turnover table
+      if (cleanRecords.length > 0) {
+        promises.push(
+          supabase.from('gst_turnover').upsert(cleanRecords, { onConflict: 'id' })
+        );
+      }
+
+      // 3. Update master GST turnover snapshot if fullList provided
+      if (fullList && fullList.length > 0) {
+        promises.push(
+          supabase.from('app_sync_store').upsert(
+            {
+              key: 'master_gst_turnover',
+              data: fullList,
+              updated_at: now,
+            },
+            { onConflict: 'key' }
+          )
+        );
+      }
+
+      const results = await Promise.allSettled(promises);
+      const storeRes = results[0];
+      const tableRes = cleanRecords.length > 0 ? results[1] : null;
+
+      let isSuccess = false;
+      let errorDetail = '';
+
+      if (storeRes.status === 'fulfilled' && !storeRes.value.error) {
+        isSuccess = true;
+      } else if (storeRes.status === 'fulfilled' && storeRes.value.error) {
+        errorDetail += `Store error: ${storeRes.value.error.message}. `;
+      }
+
+      if (tableRes && tableRes.status === 'fulfilled' && !tableRes.value.error) {
+        isSuccess = true;
+      } else if (tableRes && tableRes.status === 'fulfilled' && tableRes.value.error) {
+        errorDetail += `Table error: ${tableRes.value.error.message}. `;
+      }
+
+      if (isSuccess) {
+        syncStatus.tablesStatus.gstTurnover = true;
+        syncStatus.lastSyncedAt = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+        notifyListeners();
+        return { success: true, count: cleanRecords.length };
+      } else {
+        return { success: false, count: 0, error: errorDetail || 'Failed to save GST turnover to Supabase' };
+      }
+    } catch (err: any) {
+      console.warn('Supabase syncClientGstTurnover error:', err);
+      return { success: false, count: 0, error: err?.message || 'Exception saving to Supabase' };
+    }
+  }
+
+  /**
+   * Save single GST Turnover month record to Supabase
+   */
+  static async saveSingleGstTurnoverEntry(
+    record: ClientGstTurnover,
+    fullList?: ClientGstTurnover[]
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const now = new Date().toISOString();
+      const cleanRecord = {
+        id: record.id,
+        client_id: record.client_id,
+        client_type: record.client_type || 'Normal',
+        financial_year_id: record.financial_year_id,
+        financial_year: record.financial_year || '',
+        month: record.month,
+        entry_date: record.entry_date || record.created_at || now,
+        taxable_turnover: Number(record.taxable_turnover) || 0,
+        exempt_turnover: Number(record.exempt_turnover) || 0,
+        total_gst_turnover: Number(record.total_gst_turnover) || (Number(record.taxable_turnover) || 0) + (Number(record.exempt_turnover) || 0),
+        remark: record.remark || '',
+        created_at: record.created_at || now,
+        updated_at: now,
+      };
+
+      const clientKey = `gst_turnover_client_${record.client_id}_fy_${record.financial_year_id}`;
+
+      // Update in table and sync store
+      const promises: PromiseLike<any>[] = [
+        supabase.from('gst_turnover').upsert(cleanRecord, { onConflict: 'id' }),
+      ];
+
+      if (fullList && fullList.length > 0) {
+        const clientRecords = fullList.filter(
+          (t) => t.client_id === record.client_id && t.financial_year_id === record.financial_year_id
+        );
+        promises.push(
+          supabase.from('app_sync_store').upsert(
+            {
+              key: clientKey,
+              data: clientRecords,
+              updated_at: now,
+            },
+            { onConflict: 'key' }
+          )
+        );
+        promises.push(
+          supabase.from('app_sync_store').upsert(
+            {
+              key: 'master_gst_turnover',
+              data: fullList,
+              updated_at: now,
+            },
+            { onConflict: 'key' }
+          )
+        );
+      }
+
+      await Promise.allSettled(promises);
       syncStatus.tablesStatus.gstTurnover = true;
       notifyListeners();
+      return { success: true };
+    } catch (err: any) {
+      console.warn('Supabase saveSingleGstTurnoverEntry error:', err);
+      return { success: false, error: err?.message || 'Error saving turnover record' };
+    }
+  }
+
+  /**
+   * Delete a single GST Turnover entry from Supabase
+   */
+  static async deleteGstTurnoverRecord(
+    recordId: number,
+    fullList?: ClientGstTurnover[]
+  ): Promise<void> {
+    try {
+      const promises: PromiseLike<any>[] = [
+        supabase.from('gst_turnover').delete().eq('id', recordId),
+      ];
+
+      if (fullList) {
+        promises.push(
+          supabase.from('app_sync_store').upsert(
+            {
+              key: 'master_gst_turnover',
+              data: fullList,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'key' }
+          )
+        );
+      }
+
+      await Promise.allSettled(promises);
+      notifyListeners();
     } catch (err) {
-      console.warn('Supabase syncGstTurnover error:', err);
+      console.warn('Supabase deleteGstTurnoverRecord error:', err);
+    }
+  }
+
+  /**
+   * Delete all GST Turnover for a client (and optional FY)
+   */
+  static async deleteClientGstTurnover(
+    clientId: number,
+    fyId?: number,
+    fullList?: ClientGstTurnover[]
+  ): Promise<void> {
+    try {
+      let query = supabase.from('gst_turnover').delete().eq('client_id', clientId);
+      if (fyId) {
+        query = query.eq('financial_year_id', fyId);
+      }
+
+      const promises: PromiseLike<any>[] = [query];
+
+      if (fyId) {
+        promises.push(
+          supabase.from('app_sync_store').delete().eq('key', `gst_turnover_client_${clientId}_fy_${fyId}`)
+        );
+      }
+
+      if (fullList) {
+        promises.push(
+          supabase.from('app_sync_store').upsert(
+            {
+              key: 'master_gst_turnover',
+              data: fullList,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'key' }
+          )
+        );
+      }
+
+      await Promise.allSettled(promises);
+      notifyListeners();
+    } catch (err) {
+      console.warn('Supabase deleteClientGstTurnover error:', err);
+    }
+  }
+
+  /**
+   * Fetch all GST Turnover data from Supabase with complete deduplication & union
+   * Guarantees that records from all clients and all FYs are fully assembled without omission.
+   */
+  static async fetchGstTurnoverFromSupabase(): Promise<ClientGstTurnover[]> {
+    try {
+      // 1. Fetch from table and sync store keys in parallel
+      const [tableRes, masterStoreRes, clientStoreRowsRes, snapshotRes] = await Promise.allSettled([
+        supabase.from('gst_turnover').select('*').order('id', { ascending: true }),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_gst_turnover').maybeSingle(),
+        supabase.from('app_sync_store').select('key, data').like('key', 'gst_turnover_client_%'),
+        supabase.from('app_sync_store').select('data').eq('key', 'complete_gst_portal_snapshot').maybeSingle(),
+      ]);
+
+      const recordMap = new Map<string, ClientGstTurnover>();
+
+      const mergeRecord = (r: any) => {
+        if (!r || typeof r.client_id !== 'number' || typeof r.financial_year_id !== 'number' || !r.month) {
+          return;
+        }
+        const key = `${r.client_id}_${r.financial_year_id}_${r.month}`;
+        const existing = recordMap.get(key);
+
+        const rec: ClientGstTurnover = {
+          id: typeof r.id === 'number' ? r.id : Date.now() + Math.floor(Math.random() * 100000),
+          client_id: r.client_id,
+          client_type: r.client_type || 'Normal',
+          financial_year_id: r.financial_year_id,
+          financial_year: r.financial_year || '',
+          month: r.month,
+          entry_date: r.entry_date || r.created_at || new Date().toISOString(),
+          taxable_turnover: Number(r.taxable_turnover) || 0,
+          exempt_turnover: Number(r.exempt_turnover) || 0,
+          total_gst_turnover: Number(r.total_gst_turnover) || (Number(r.taxable_turnover) || 0) + (Number(r.exempt_turnover) || 0),
+          remark: r.remark || '',
+          created_at: r.created_at || new Date().toISOString(),
+          updated_at: r.updated_at || r.created_at || new Date().toISOString(),
+        };
+
+        if (!existing) {
+          recordMap.set(key, rec);
+        } else {
+          // If existing had 0/empty and new has real values, or if new has later updated_at, choose more recent
+          const exTime = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
+          const newTime = rec.updated_at ? new Date(rec.updated_at).getTime() : 0;
+          if (newTime >= exTime || (!existing.taxable_turnover && !existing.exempt_turnover && (rec.taxable_turnover || rec.exempt_turnover))) {
+            recordMap.set(key, { ...existing, ...rec });
+          }
+        }
+      };
+
+      // 1. Snapshot fallback
+      if (snapshotRes.status === 'fulfilled' && snapshotRes.value.data?.data?.gst_turnover) {
+        const snapList = snapshotRes.value.data.data.gst_turnover;
+        if (Array.isArray(snapList)) snapList.forEach(mergeRecord);
+      }
+
+      // 2. Master store
+      if (masterStoreRes.status === 'fulfilled' && Array.isArray(masterStoreRes.value.data?.data)) {
+        masterStoreRes.value.data.data.forEach(mergeRecord);
+      }
+
+      // 3. Client-specific keys in app_sync_store
+      if (clientStoreRowsRes.status === 'fulfilled' && Array.isArray(clientStoreRowsRes.value.data)) {
+        clientStoreRowsRes.value.data.forEach((row) => {
+          if (Array.isArray(row.data)) {
+            row.data.forEach(mergeRecord);
+          }
+        });
+      }
+
+      // 4. Relational table rows
+      if (tableRes.status === 'fulfilled' && Array.isArray(tableRes.value.data)) {
+        tableRes.value.data.forEach(mergeRecord);
+      }
+
+      const mergedList = Array.from(recordMap.values());
+      return mergedList;
+    } catch (err) {
+      console.warn('Error fetching GST turnover from Supabase:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch specific client's GST Turnover for a specific Financial Year from Supabase
+   */
+  static async fetchClientGstTurnoverFromSupabase(
+    clientId: number,
+    fyId: number
+  ): Promise<ClientGstTurnover[]> {
+    try {
+      // 1. Try client-specific key in sync store
+      const clientKey = `gst_turnover_client_${clientId}_fy_${fyId}`;
+      const { data: storeData } = await supabase
+        .from('app_sync_store')
+        .select('data')
+        .eq('key', clientKey)
+        .maybeSingle();
+
+      if (storeData?.data && Array.isArray(storeData.data) && storeData.data.length > 0) {
+        return storeData.data as ClientGstTurnover[];
+      }
+
+      // 2. Try relational table query
+      const { data: tableData, error: tableErr } = await supabase
+        .from('gst_turnover')
+        .select('*')
+        .eq('client_id', clientId)
+        .eq('financial_year_id', fyId);
+
+      if (!tableErr && Array.isArray(tableData) && tableData.length > 0) {
+        return tableData as ClientGstTurnover[];
+      }
+
+      // 3. Check master list in sync store
+      const { data: masterData } = await supabase
+        .from('app_sync_store')
+        .select('data')
+        .eq('key', 'master_gst_turnover')
+        .maybeSingle();
+
+      if (masterData?.data && Array.isArray(masterData.data)) {
+        const filtered = (masterData.data as ClientGstTurnover[]).filter(
+          (t) => t.client_id === clientId && t.financial_year_id === fyId
+        );
+        if (filtered.length > 0) return filtered;
+      }
+
+      return [];
+    } catch (err) {
+      console.warn('Error fetching client GST turnover from Supabase:', err);
+      return [];
     }
   }
 
