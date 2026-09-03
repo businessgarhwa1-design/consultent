@@ -32,6 +32,8 @@ import { CsvImportModal } from './components/CsvImportModal';
 import { BankTurnover } from './components/BankTurnover';
 import { GstTurnoverEntry } from './components/GstTurnoverEntry';
 import { OfficeVisits } from './components/OfficeVisits/OfficeVisits';
+import { useIsMobile } from './hooks/useIsMobile';
+import { StaffMobileLayout } from './components/StaffMobile/StaffMobileLayout';
 import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, AlertCircle, Info, ShieldAlert, ArrowLeft } from 'lucide-react';
 
@@ -53,6 +55,7 @@ export default function App() {
   // UI State with persisted active tab
   const [activeTab, setActiveTabState] = useState<TabType>(() => GSTStorage.getActiveTab());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   const setActiveTab = (tab: TabType) => {
     setActiveTabState(tab);
@@ -650,6 +653,44 @@ export default function App() {
     }).length;
 
   const inVisitsCount = officeVisits.filter((v) => v.status === 'IN').length;
+
+  // STRICT REQUIREMENT: If user is Staff AND screen width is mobile → Staff Mobile Responsive UI
+  // Admin on Mobile, Admin on Desktop, and Staff on Desktop remain 100% UNTOUCHED with existing UI
+  if (isMobile && currentUser.role === 'staff') {
+    return (
+      <StaffMobileLayout
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onSwitchUser={handleSwitchUser}
+        users={users}
+        clients={clients}
+        financialYears={financialYears}
+        selectedFY={selectedFY}
+        onSelectFY={setSelectedFY}
+        fySortOrder={fySortOrder}
+        onToggleFYSortOrder={handleToggleFYSortOrder}
+        selectedMonth={selectedMonth}
+        onSelectMonth={setSelectedMonth}
+        monthlyWork={monthlyWork}
+        officeVisits={officeVisits}
+        settings={settings}
+        onUpdateStatus={handleUpdateStatus}
+        onRefreshPortal={handleRefreshPortal}
+        isRefreshingPortal={isRefreshingPortal}
+        onSaveClient={handleSaveClient}
+        onDeleteClient={handleDeleteClient}
+        onAddOfficeVisit={handleAddOfficeVisit}
+        onUpdateOfficeVisit={handleUpdateOfficeVisit}
+        onMarkOfficeVisitOut={handleMarkOfficeVisitOut}
+        onAddOfficeVisitNote={handleAddOfficeVisitNote}
+        onDeleteOfficeVisit={handleDeleteOfficeVisit}
+        onExportMonthlyCSV={handleExportMonthlyCSV}
+        onExportClientsCSV={handleExportClientsCSV}
+        toast={toast}
+        showToast={showToast}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900 antialiased selection:bg-blue-600 selection:text-white">

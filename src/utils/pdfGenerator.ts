@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FinancialReportData, FinancialYear, ReportType, FY_MONTHS, Client, WorkStatus } from '../types';
+import { FinancialReportData, FinancialYear, ReportType, FY_MONTHS, Client, WorkStatus, ClientGstTurnover } from '../types';
 
 // Format Indian Currency Number for PDF rendering
 export const formatINRNumber = (val: number): string => {
@@ -994,6 +994,53 @@ export interface AllClientsGstTurnoverExportData {
   annualExempt: number;
   annualTotal: number;
 }
+
+export const buildAllClientsGstTurnoverExportData = (
+  clients: Client[],
+  turnovers: ClientGstTurnover[],
+  fy: FinancialYear
+): AllClientsGstTurnoverExportData[] => {
+  return clients.map((client) => {
+    const clientTurnovers = turnovers.filter(
+      (t) => t.client_id === client.id && t.financial_year_id === fy.id
+    );
+
+    const monthly: Record<string, { taxable: number; exempt: number; total: number }> = {};
+    let annualTaxable = 0;
+    let annualExempt = 0;
+
+    FY_MONTHS.forEach((m) => {
+      const rec = clientTurnovers.find((t) => t.month === m);
+      const taxable = rec ? Number(rec.taxable_turnover) || 0 : 0;
+      const exempt = rec ? Number(rec.exempt_turnover) || 0 : 0;
+      const total = taxable + exempt;
+      monthly[m] = { taxable, exempt, total };
+      annualTaxable += taxable;
+      annualExempt += exempt;
+    });
+
+    const q1 = (monthly['April']?.total || 0) + (monthly['May']?.total || 0) + (monthly['June']?.total || 0);
+    const q2 = (monthly['July']?.total || 0) + (monthly['August']?.total || 0) + (monthly['September']?.total || 0);
+    const q3 = (monthly['October']?.total || 0) + (monthly['November']?.total || 0) + (monthly['December']?.total || 0);
+    const q4 = (monthly['January']?.total || 0) + (monthly['February']?.total || 0) + (monthly['March']?.total || 0);
+
+    return {
+      client,
+      fileNo: client.file_no || '',
+      firmName: client.firm_name,
+      gstin: client.gstin,
+      clientName: client.client_name || '',
+      mobile: client.mobile,
+      gstType: client.gst_type || 'Normal',
+      staffName: 'Staff',
+      monthly,
+      quarterly: { q1, q2, q3, q4 },
+      annualTaxable,
+      annualExempt,
+      annualTotal: annualTaxable + annualExempt,
+    };
+  });
+};
 
 /**
  * Generates professional Landscape 12-Month GST Turnover PDF Report for All Clients
