@@ -912,6 +912,10 @@ export default function App() {
               users={users}
               currentUser={currentUser}
               activeClient={activeClient}
+              financialYears={financialYears}
+              selectedFY={selectedFY}
+              selectedMonth={selectedMonth}
+              officeVisits={officeVisits}
               onSelectActiveClient={handleSelectActiveClient}
               onNavigateTab={(tab, targetClientId) => {
                 if (targetClientId) {
