@@ -31,11 +31,21 @@ import {
   Plus,
   Search,
   ChevronRight,
+  ChevronLeft,
   Shield,
   Clock,
   Sparkles,
   Info,
   RefreshCw,
+  X,
+  ArrowUpDown,
+  Minimize2,
+  Maximize2,
+  SlidersHorizontal,
+  Phone,
+  MapPin,
+  UserCheck,
+  Columns,
 } from 'lucide-react';
 
 interface BankTurnoverProps {
@@ -61,6 +71,9 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     initialClientId || (clients.length > 0 ? clients[0].id : 0)
   );
   const [clientSearch, setClientSearch] = useState('');
+  const [clientSchemeFilter, setClientSchemeFilter] = useState<'all' | 'Normal' | 'Composition' | 'QRMP'>('all');
+  const [clientSortBy, setClientSortBy] = useState<'file_asc' | 'file_desc' | 'name_asc' | 'turnover_desc'>('file_asc');
+  const [isClientPanelCollapsed, setIsClientPanelCollapsed] = useState(false);
   const [activeTabSlot, setActiveTabSlot] = useState<BankAccountSlot | 'all'>('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -124,6 +137,31 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     loadData();
     setEditingSlotConfig(null);
     setUploadError(null);
+
+    // Direct background sync with Supabase for the active client and financial year
+    if (selectedClientId) {
+      SupabaseService.fetchClientBankData(selectedClientId, selectedFY.id)
+        .then((res) => {
+          if (res.accounts.length > 0 || res.turnover.length > 0) {
+            loadData();
+          }
+        })
+        .catch(() => {});
+    }
+  }, [selectedClientId, selectedFY.id]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      loadData();
+    };
+    window.addEventListener('bank-data-updated', handleUpdate);
+    const unsub = SupabaseService.subscribe(() => {
+      loadData();
+    });
+    return () => {
+      window.removeEventListener('bank-data-updated', handleUpdate);
+      unsub();
+    };
   }, [selectedClientId, selectedFY.id]);
 
   useEffect(() => {
@@ -137,20 +175,89 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     return clients.find((c) => c.id === selectedClientId) || clients[0];
   }, [clients, selectedClientId]);
 
-  // Search filtered clients (including by File No, firm name, GSTIN, client name, mobile)
+  // Client scheme breakdown counts
+  const schemeCounts = useMemo(() => {
+    const counts = { all: clients.length, Normal: 0, Composition: 0, QRMP: 0 };
+    clients.forEach((c) => {
+      const norm = (c.gst_type || 'Normal').toLowerCase();
+      if (norm === 'composition') counts.Composition++;
+      else if (norm === 'qrmp') counts.QRMP++;
+      else counts.Normal++;
+    });
+    return counts;
+  }, [clients]);
+
+  // Filtered and sorted clients
   const filteredClients = useMemo(() => {
-    if (!clientSearch.trim()) return clients;
-    const q = clientSearch.toLowerCase().trim();
-    return clients.filter(
-      (c) =>
-        (c.file_no && c.file_no.toLowerCase().includes(q)) ||
-        c.firm_name.toLowerCase().includes(q) ||
-        c.gstin.toLowerCase().includes(q) ||
-        c.client_name.toLowerCase().includes(q) ||
-        (c.mobile && c.mobile.includes(q)) ||
-        (c.alternate_mobile && c.alternate_mobile.includes(q))
-    );
-  }, [clients, clientSearch]);
+    let result = clients;
+
+    // Search query (File no, firm name, gstin, client name, mobile)
+    if (clientSearch.trim()) {
+      const q = clientSearch.toLowerCase().trim();
+      result = result.filter(
+        (c) =>
+          (c.file_no && c.file_no.toLowerCase().includes(q)) ||
+          c.firm_name.toLowerCase().includes(q) ||
+          c.gstin.toLowerCase().includes(q) ||
+          (c.client_name && c.client_name.toLowerCase().includes(q)) ||
+          (c.mobile && c.mobile.includes(q)) ||
+          (c.alternate_mobile && c.alternate_mobile.includes(q))
+      );
+    }
+
+    // Scheme filter
+    if (clientSchemeFilter !== 'all') {
+      result = result.filter((c) => {
+        const norm = (c.gst_type || 'Normal').toLowerCase();
+        if (clientSchemeFilter === 'Normal') return norm === 'normal' || norm === 'regular';
+        if (clientSchemeFilter === 'Composition') return norm === 'composition';
+        if (clientSchemeFilter === 'QRMP') return norm === 'qrmp';
+        return true;
+      });
+    }
+
+    // Sorting
+    return [...result].sort((a, b) => {
+      if (clientSortBy === 'file_asc') {
+        const numA = parseInt(a.file_no || '999999', 10);
+        const numB = parseInt(b.file_no || '999999', 10);
+        if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+        return (a.file_no || '').localeCompare(b.file_no || '');
+      }
+      if (clientSortBy === 'file_desc') {
+        const numA = parseInt(a.file_no || '-1', 10);
+        const numB = parseInt(b.file_no || '-1', 10);
+        if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numB - numA;
+        return (b.file_no || '').localeCompare(a.file_no || '');
+      }
+      if (clientSortBy === 'name_asc') {
+        return a.firm_name.localeCompare(b.firm_name);
+      }
+      if (clientSortBy === 'turnover_desc') {
+        const sumA = GSTStorage.getClientBankTurnoverSummary(a.id, selectedFY.id).grandTotal;
+        const sumB = GSTStorage.getClientBankTurnoverSummary(b.id, selectedFY.id).grandTotal;
+        return sumB - sumA;
+      }
+      return 0;
+    });
+  }, [clients, clientSearch, clientSchemeFilter, clientSortBy, selectedFY.id]);
+
+  // Current client index in filtered list for Prev / Next steppers
+  const currentClientIndex = useMemo(() => {
+    return filteredClients.findIndex((c) => c.id === selectedClientId);
+  }, [filteredClients, selectedClientId]);
+
+  const handlePrevClient = () => {
+    if (filteredClients.length === 0) return;
+    const newIdx = currentClientIndex > 0 ? currentClientIndex - 1 : filteredClients.length - 1;
+    setSelectedClientId(filteredClients[newIdx].id);
+  };
+
+  const handleNextClient = () => {
+    if (filteredClients.length === 0) return;
+    const newIdx = currentClientIndex < filteredClients.length - 1 ? currentClientIndex + 1 : 0;
+    setSelectedClientId(filteredClients[newIdx].id);
+  };
 
   // Format currency in Indian numbering format
   const formatINR = (val: number): string => {
@@ -400,6 +507,9 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
   const handleRefreshTurnover = async () => {
     setIsRefreshing(true);
     try {
+      if (selectedClientId) {
+        await SupabaseService.fetchClientBankData(selectedClientId, selectedFY.id);
+      }
       const remoteRes = await SupabaseService.fetchAllProjectDataFromSupabase();
       if (remoteRes.success && remoteRes.data) {
         if (Array.isArray(remoteRes.data.bank_accounts) && remoteRes.data.bank_accounts.length > 0) {
@@ -479,6 +589,22 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
             </select>
           </div>
 
+          {/* Toggle Wide Table View / Client Sidebar */}
+          <button
+            type="button"
+            id="toggle-client-sidebar-btn"
+            onClick={() => setIsClientPanelCollapsed((prev) => !prev)}
+            className={`flex items-center gap-1.5 font-bold text-xs px-3.5 py-2 rounded-xl border shadow-xs transition-all cursor-pointer ${
+              isClientPanelCollapsed
+                ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+            }`}
+            title={isClientPanelCollapsed ? 'Expand Client Selection Sidebar' : 'Collapse Client Selection to expand Table width'}
+          >
+            <Columns className="w-3.5 h-3.5" />
+            <span>{isClientPanelCollapsed ? 'Show Clients List' : 'Wide Table View'}</span>
+          </button>
+
           {/* Dedicated Refresh Button */}
           <button
             id="bank-turnover-refresh-btn"
@@ -509,141 +635,327 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
       {/* Main Grid: Client Selector on Left + 5 Bank Slots on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Side: Client Selector & Info (4 cols) */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Search Client */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                Select Client ({clients.length})
-              </span>
-            </div>
-
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                id="bank-turnover-client-search"
-                type="text"
-                value={clientSearch}
-                onChange={(e) => setClientSearch(e.target.value)}
-                placeholder="Search by File No, firm, GSTIN, name, mobile..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:bg-white focus:outline-hidden focus:border-blue-500"
-              />
-            </div>
-
-            {/* Clients List */}
-            <div className="max-h-[360px] overflow-y-auto space-y-1.5 pr-1">
-              {filteredClients.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-400">
-                  No clients match "{clientSearch}"
+        {!isClientPanelCollapsed && (
+          <div className="lg:col-span-4 space-y-4">
+            {/* Search & Select Client */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+              {/* Header with Title, Count, Steppers, and Collapse button */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                    Select Client
+                  </span>
+                  <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-md">
+                    {filteredClients.length}/{clients.length}
+                  </span>
                 </div>
-              ) : (
-                filteredClients.map((c) => {
-                  const isSelected = c.id === selectedClientId;
-                  const summary = GSTStorage.getClientBankTurnoverSummary(c.id, selectedFY.id);
+                <div className="flex items-center gap-1">
+                  {/* Prev / Next Steppers */}
+                  <button
+                    type="button"
+                    onClick={handlePrevClient}
+                    disabled={filteredClients.length <= 1}
+                    className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer transition-all"
+                    title="Previous Client"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[10px] font-mono font-bold text-slate-400">
+                    {filteredClients.length > 0 ? `${currentClientIndex + 1}/${filteredClients.length}` : '0/0'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNextClient}
+                    disabled={filteredClients.length <= 1}
+                    className="p-1 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-900 disabled:opacity-30 cursor-pointer transition-all"
+                    title="Next Client"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                  {/* Minimize Panel Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsClientPanelCollapsed(true)}
+                    className="p-1 ml-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    title="Collapse sidebar to full-width table"
+                  >
+                    <Minimize2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
 
-                  return (
-                    <div
-                      key={c.id}
-                      id={`bank-client-item-${c.id}`}
-                      onClick={() => setSelectedClientId(c.id)}
-                      className={`p-3 rounded-xl border transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-50/80 border-blue-300 shadow-xs'
-                          : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/70'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-1">
-                        <div className="font-bold text-slate-900 text-xs truncate">{c.firm_name}</div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {c.file_no && (
-                            <span className="text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded font-bold">
-                              #{c.file_no}
-                            </span>
-                          )}
-                          <span className="text-[10px] font-mono bg-white border border-slate-200 px-1.5 py-0.2 rounded font-bold text-slate-700">
-                            {c.gstin.substring(0, 7)}...
+              {/* Instant Client Dropdown */}
+              <div className="relative">
+                <select
+                  id="bank-turnover-client-quick-select"
+                  value={selectedClientId}
+                  onChange={(e) => setSelectedClientId(Number(e.target.value))}
+                  className="w-full bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer truncate"
+                >
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.file_no ? `[#${c.file_no}] ` : ''}{c.firm_name} - {c.gstin}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Search Bar with Clear Button */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  id="bank-turnover-client-search"
+                  type="text"
+                  value={clientSearch}
+                  onChange={(e) => setClientSearch(e.target.value)}
+                  placeholder="Search by File #, Firm, GSTIN, Mobile..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-7 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                />
+                {clientSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setClientSearch('')}
+                    className="absolute right-2 top-2 p-0.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Scheme Filter Pills */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+                {(['all', 'Normal', 'Composition', 'QRMP'] as const).map((scheme) => (
+                  <button
+                    key={scheme}
+                    type="button"
+                    onClick={() => setClientSchemeFilter(scheme)}
+                    className={`text-[10px] px-2 py-1 rounded-lg font-bold whitespace-nowrap transition-all cursor-pointer ${
+                      clientSchemeFilter === scheme
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {scheme === 'all' ? `All (${schemeCounts.all})` : `${scheme} (${schemeCounts[scheme]})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Sort selector row */}
+              <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-100">
+                <span className="text-slate-400 font-medium">Sort by:</span>
+                <select
+                  value={clientSortBy}
+                  onChange={(e) => setClientSortBy(e.target.value as any)}
+                  className="bg-transparent font-bold text-slate-700 focus:outline-none cursor-pointer"
+                >
+                  <option value="file_asc">File # (Ascending)</option>
+                  <option value="file_desc">File # (Descending)</option>
+                  <option value="name_asc">Firm Name (A to Z)</option>
+                  <option value="turnover_desc">Turnover (High to Low)</option>
+                </select>
+              </div>
+
+              {/* Clients List */}
+              <div className="max-h-[360px] overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                {filteredClients.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    No clients match "{clientSearch}"
+                  </div>
+                ) : (
+                  filteredClients.map((c) => {
+                    const isSelected = c.id === selectedClientId;
+                    const summary = GSTStorage.getClientBankTurnoverSummary(c.id, selectedFY.id);
+
+                    return (
+                      <div
+                        key={c.id}
+                        id={`bank-client-item-${c.id}`}
+                        onClick={() => setSelectedClientId(c.id)}
+                        className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-blue-50/90 border-blue-400 ring-1 ring-blue-300 shadow-xs'
+                            : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/80 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-1">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              {c.file_no && (
+                                <span className="text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded font-black shrink-0">
+                                  #{c.file_no}
+                                </span>
+                              )}
+                              <div className="font-bold text-slate-900 text-xs truncate">
+                                {c.firm_name}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] font-mono text-slate-600">
+                                {c.gstin}
+                              </span>
+                              <span className="text-[9px] font-bold px-1 rounded uppercase bg-slate-200/80 text-slate-700">
+                                {c.gst_type || 'Normal'}
+                              </span>
+                            </div>
+                            {c.mobile && (
+                              <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                                <Phone className="w-2.5 h-2.5" />
+                                <span>{c.mobile}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-200/60 text-[11px]">
+                          <span className="text-slate-500 font-medium">{summary.accountCount} Bank Account(s)</span>
+                          <span className="font-bold text-slate-900">
+                            {summary.grandTotal > 0 ? formatINR(summary.grandTotal) : '₹0'}
                           </span>
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-between mt-1.5 text-[11px]">
-                        <span className="text-slate-500">{summary.accountCount} Bank Account(s)</span>
-                        <span className="font-bold text-slate-900">
-                          {summary.grandTotal > 0 ? formatINR(summary.grandTotal) : '₹0'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
+                    );
+                  })
+                )}
+              </div>
             </div>
-          </div>
 
-          {/* Active Client Details Card */}
-          {selectedClient && (
-            <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
-                      Active Client Details
+            {/* Active Client Details Card */}
+            {selectedClient && (
+              <div className="bg-slate-900 text-white p-4.5 rounded-2xl border border-slate-800 shadow-sm space-y-3.5">
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">
+                        Active Client Details
+                      </span>
+                      {selectedClient.file_no && (
+                        <span className="text-[10px] font-mono bg-blue-900/80 text-blue-300 border border-blue-600/60 px-1.5 py-0.2 rounded font-bold">
+                          File #{selectedClient.file_no}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-bold text-sm text-white mt-0.5 truncate">{selectedClient.firm_name}</h3>
+                    <div className="font-mono text-xs font-semibold text-slate-300 mt-0.5">
+                      GSTIN: {selectedClient.gstin}
+                    </div>
+                  </div>
+                  <div className="w-8 h-8 rounded-lg bg-slate-800 text-blue-400 flex items-center justify-center shrink-0 ml-2">
+                    <Building className="w-4 h-4" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs border-t border-slate-800 pt-2.5 text-slate-300">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Contact Person</span>
+                    <span className="font-semibold text-white truncate block">{selectedClient.client_name || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Mobile Phone</span>
+                    <span className="font-semibold text-white">{selectedClient.mobile || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">GST Scheme</span>
+                    <span className="font-semibold text-white capitalize">{selectedClient.gst_type || 'Normal'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">City / State</span>
+                    <span className="font-semibold text-white truncate block">{selectedClient.city || 'State'}</span>
+                  </div>
+                </div>
+
+                {/* Grand Total Summary Box */}
+                <div className="bg-gradient-to-r from-blue-900/60 to-indigo-900/60 border border-blue-500/40 p-3 rounded-xl">
+                  <div className="text-[11px] text-blue-300 font-bold uppercase tracking-wider flex items-center justify-between">
+                    <span>Grand Total Bank Turnover</span>
+                    <span className="text-[10px] bg-blue-500/30 text-blue-200 px-1.5 py-0.2 rounded font-mono">
+                      FY {selectedFY.display_name}
                     </span>
+                  </div>
+                  <div className="text-xl font-black text-white mt-1">
+                    {formatINR(grandTotalTurnover)}
+                  </div>
+                  <div className="text-[10px] text-blue-300 mt-0.5">
+                    Sum of all {bankAccounts.length} configured bank account(s)
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Right Side: 5 Bank Account Slots */}
+        <div className={`${isClientPanelCollapsed ? 'lg:col-span-12' : 'lg:col-span-8'} space-y-5`}>
+          {/* Top Quick Client Selector Bar when Client Panel is Collapsed */}
+          {isClientPanelCollapsed && selectedClient && (
+            <div className="bg-white p-3 rounded-2xl border border-blue-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setIsClientPanelCollapsed(false)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs border border-blue-200 cursor-pointer transition-all shrink-0"
+                  title="Show full client list panel"
+                >
+                  <Columns className="w-3.5 h-3.5" />
+                  <span>Show Clients</span>
+                </button>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
                     {selectedClient.file_no && (
-                      <span className="text-[10px] font-mono bg-blue-900/80 text-blue-300 border border-blue-600/60 px-1.5 py-0.2 rounded font-bold">
-                        File #{selectedClient.file_no}
+                      <span className="text-[10px] font-mono bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.2 rounded font-black shrink-0">
+                        #{selectedClient.file_no}
                       </span>
                     )}
+                    <span className="font-bold text-slate-900 text-xs truncate">{selectedClient.firm_name}</span>
                   </div>
-                  <h3 className="font-bold text-sm text-white mt-0.5">{selectedClient.firm_name}</h3>
-                  <div className="font-mono text-xs font-semibold text-slate-300 mt-1">
-                    GSTIN: {selectedClient.gstin}
+                  <div className="text-[10px] font-mono text-slate-500 truncate">
+                    {selectedClient.gstin} • <span className="uppercase font-semibold text-blue-600">{selectedClient.gst_type || 'Normal'}</span>
                   </div>
-                </div>
-                <div className="w-8 h-8 rounded-lg bg-slate-800 text-blue-400 flex items-center justify-center">
-                  <Building className="w-4 h-4" />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs border-t border-slate-800 pt-3 text-slate-300">
-                <div>
-                  <span className="text-[10px] text-slate-400 block">Contact Person</span>
-                  <span className="font-semibold text-white">{selectedClient.client_name}</span>
+              <div className="flex items-center gap-2.5 shrink-0">
+                {/* Steppers & Dropdown */}
+                <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-0.5">
+                  <button
+                    type="button"
+                    onClick={handlePrevClient}
+                    disabled={filteredClients.length <= 1}
+                    className="p-1 rounded-lg hover:bg-white text-slate-600 disabled:opacity-30 cursor-pointer transition-all"
+                    title="Previous Client"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <select
+                    value={selectedClientId}
+                    onChange={(e) => setSelectedClientId(Number(e.target.value))}
+                    className="bg-transparent text-xs font-bold text-slate-800 py-1 px-1.5 focus:outline-none cursor-pointer max-w-[200px] truncate"
+                  >
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.file_no ? `[#${c.file_no}] ` : ''}{c.firm_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleNextClient}
+                    disabled={filteredClients.length <= 1}
+                    className="p-1 rounded-lg hover:bg-white text-slate-600 disabled:opacity-30 cursor-pointer transition-all"
+                    title="Next Client"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block">Mobile Phone</span>
-                  <span className="font-semibold text-white">{selectedClient.mobile}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block">GST Scheme</span>
-                  <span className="font-semibold text-white capitalize">{selectedClient.gst_type}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block">City / State</span>
-                  <span className="font-semibold text-white truncate">{selectedClient.city || 'State'}</span>
-                </div>
-              </div>
 
-              {/* Grand Total Summary Box */}
-              <div className="bg-gradient-to-r from-blue-900/60 to-indigo-900/60 border border-blue-500/40 p-3.5 rounded-xl">
-                <div className="text-[11px] text-blue-300 font-bold uppercase tracking-wider flex items-center justify-between">
-                  <span>Grand Total Bank Turnover</span>
-                  <span className="text-[10px] bg-blue-500/30 text-blue-200 px-1.5 py-0.2 rounded font-mono">
-                    FY {selectedFY.display_name}
-                  </span>
-                </div>
-                <div className="text-2xl font-black text-white mt-1">
-                  {formatINR(grandTotalTurnover)}
-                </div>
-                <div className="text-[10px] text-blue-300 mt-1">
-                  Sum of all {bankAccounts.length} configured bank account(s)
+                {/* Grand total pill */}
+                <div className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                  <span className="text-[10px] text-slate-400 font-normal">FY Turnover:</span>
+                  <span>{formatINR(grandTotalTurnover)}</span>
                 </div>
               </div>
             </div>
           )}
-        </div>
-
-        {/* Right Side: 5 Bank Account Slots (8 cols) */}
-        <div className="lg:col-span-8 space-y-5">
           {/* Quick Slot Filter Tabs */}
           <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-2xs flex items-center gap-1.5 overflow-x-auto">
             <button

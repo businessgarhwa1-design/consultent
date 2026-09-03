@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ActivityLog, Client, FinancialYear, User, UserSession } from '../types';
 import { GSTStorage } from '../utils/storage';
 import {
@@ -44,6 +44,7 @@ interface ActivityLogsProps {
   clients?: Client[];
   financialYears?: FinancialYear[];
   currentUser?: User | null;
+  initialClientId?: number | null;
 }
 
 export const ActivityLogs: React.FC<ActivityLogsProps> = ({
@@ -52,6 +53,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({
   clients = [],
   financialYears = [],
   currentUser,
+  initialClientId,
 }) => {
   // View mode: 'audit-trail' or 'live-sessions'
   const [viewMode, setViewMode] = useState<'audit-trail' | 'live-sessions'>('audit-trail');
@@ -61,7 +63,15 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({
   const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
   const [selectedModule, setSelectedModule] = useState<string>('all');
   const [selectedAction, setSelectedAction] = useState<string>('all');
-  const [selectedClientId, setSelectedClientId] = useState<string>('all');
+  const [selectedClientId, setSelectedClientId] = useState<string>(
+    initialClientId ? String(initialClientId) : 'all'
+  );
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(String(initialClientId));
+    }
+  }, [initialClientId]);
   const [selectedFYId, setSelectedFYId] = useState<string>('all');
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | '7days' | '30days' | 'custom'>('all');
   const [customStartDate, setCustomStartDate] = useState('');

@@ -103,6 +103,7 @@ const STORAGE_KEYS = {
   CURRENT_SESSION_ID: 'gst_app_current_session_id',
   OFFICE_VISITS: 'gst_app_office_visits_v1',
   PASSWORD_RESETS: 'gst_app_password_resets_v1',
+  ACTIVE_CLIENT_ID: 'gst_app_active_client_id_v1',
 };
 
 // Resilient In-Memory Storage Fallback for restricted / private iframe environments
@@ -1152,6 +1153,7 @@ export class GSTStorage {
     const raw = safeGetItem(STORAGE_KEYS.ACTIVE_TAB);
     const validTabs: TabType[] = [
       'dashboard',
+      'client-selection',
       'clients',
       'office-visits',
       'monthly-work',
@@ -1174,6 +1176,21 @@ export class GSTStorage {
 
   static setActiveTab(tab: TabType) {
     safeSetItem(STORAGE_KEYS.ACTIVE_TAB, tab);
+  }
+
+  static getActiveClientId(): number | null {
+    const raw = safeGetItem(STORAGE_KEYS.ACTIVE_CLIENT_ID);
+    if (!raw) return null;
+    const n = Number(raw);
+    return isNaN(n) || n <= 0 ? null : n;
+  }
+
+  static setActiveClientId(clientId: number | null) {
+    if (clientId === null || clientId === undefined) {
+      safeRemoveItem(STORAGE_KEYS.ACTIVE_CLIENT_ID);
+    } else {
+      safeSetItem(STORAGE_KEYS.ACTIVE_CLIENT_ID, String(clientId));
+    }
   }
 
   // Central Comprehensive Activity & Audit Logger
@@ -1603,6 +1620,9 @@ export class GSTStorage {
     safeSetItem(STORAGE_KEYS.BANK_ACCOUNTS, JSON.stringify(accounts));
     CloudService.batchSyncBankAccountsToCloud(accounts).catch((e) => console.warn('Cloud sync bank accounts error:', e));
     SupabaseService.syncBankAccounts(accounts).catch((e) => console.warn('Supabase sync bank accounts error:', e));
+    try {
+      window.dispatchEvent(new CustomEvent('bank-data-updated'));
+    } catch {}
   }
 
   static getClientBankAccounts(clientId: number, fyId?: number): ClientBankAccount[] {
@@ -1620,8 +1640,8 @@ export class GSTStorage {
 
     // Filter accounts visible in the requested FY
     const visibleAccounts = clientAccounts.filter((acc) => {
-      // 1. If active, it is persistent and visible across all Financial Years
-      if (acc.status === 'active') {
+      // 1. If active or default, it is persistent and visible across all Financial Years
+      if (!acc.status || acc.status === 'active') {
         return true;
       }
 
@@ -1655,7 +1675,7 @@ export class GSTStorage {
       if (!existing) {
         slotMap.set(acc.slot_number, acc);
       } else {
-        if (acc.status === 'active' && existing.status !== 'active') {
+        if ((!existing.status || existing.status !== 'active') && (!acc.status || acc.status === 'active')) {
           slotMap.set(acc.slot_number, acc);
         }
       }
@@ -1716,8 +1736,14 @@ export class GSTStorage {
       };
       all[existingIndex] = savedAccount;
     } else {
+      // Deterministic & collision-resistant slot account ID
+      const stableId = (accountData.client_id * 1000) + accountData.slot_number;
+      const idToUse = all.some((a) => a.id === stableId)
+        ? Date.now() + Math.floor(Math.random() * 1000)
+        : stableId;
+
       savedAccount = {
-        id: Date.now() + Math.floor(Math.random() * 1000),
+        id: idToUse,
         ...accountData,
         deactivated_in_fy_id: deactId,
         deactivated_fy_start_year: deactStartYear,
@@ -1827,6 +1853,9 @@ export class GSTStorage {
     safeSetItem(STORAGE_KEYS.BANK_TURNOVER, JSON.stringify(turnoverList));
     CloudService.batchSyncBankTurnoverToCloud(turnoverList).catch((e) => console.warn('Cloud sync bank turnover error:', e));
     SupabaseService.syncBankTurnover(turnoverList).catch((e) => console.warn('Supabase sync bank turnover error:', e));
+    try {
+      window.dispatchEvent(new CustomEvent('bank-data-updated'));
+    } catch {}
   }
 
   static getClientBankTurnover(clientId: number, fyId: number): ClientBankTurnover[] {
@@ -1859,6 +1888,7 @@ export class GSTStorage {
 
     const newValues: Record<string, number> = {};
     const changedMonths: string[] = [];
+    const updatedRowsForThisAccount: ClientBankTurnover[] = [];
 
     // Insert updated rows while preserving deterministic IDs for existing months
     Object.entries(monthlyAmounts).forEach(([month, amount]) => {
@@ -1868,7 +1898,7 @@ export class GSTStorage {
         changedMonths.push(month);
       }
       const existingRec = oldRecords.find((r) => r.month === month);
-      filtered.push({
+      const newRec: ClientBankTurnover = {
         id: existingRec ? existingRec.id : (Date.now() + Math.floor(Math.random() * 100000)),
         client_id: clientId,
         bank_account_id: bankAccountId,
@@ -1877,10 +1907,14 @@ export class GSTStorage {
         turnover_amount: numAmount,
         created_at: existingRec?.created_at || now,
         updated_at: now,
-      });
+      };
+      filtered.push(newRec);
+      updatedRowsForThisAccount.push(newRec);
     });
 
     this.saveBankTurnover(filtered);
+    SupabaseService.saveClientBankTurnoverDirect(clientId, bankAccountId, fyId, updatedRowsForThisAccount)
+      .catch((e) => console.warn('Direct Supabase turnover save error:', e));
 
     const client = this.getClientById(clientId);
     const accounts = this.getBankAccounts();

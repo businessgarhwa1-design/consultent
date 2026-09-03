@@ -105,6 +105,12 @@ export const GstTurnoverEntry: React.FC<GstTurnoverEntryProps> = ({
       .catch((e) => console.warn('Supabase fetch GST turnover notice:', e));
   }, [selectedFY.id]);
 
+  useEffect(() => {
+    if (initialClientId && initialClientId !== selectedClientId) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [initialClientId]);
+
   // Active client object
   const activeClient = useMemo(() => {
     return clients.find((c) => c.id === selectedClientId) || clients[0] || null;

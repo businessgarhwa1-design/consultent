@@ -459,6 +459,7 @@ export const VISIT_PURPOSES = [
 
 export type TabType =
   | 'dashboard'
+  | 'client-selection'
   | 'clients'
   | 'office-visits'
   | 'monthly-work'

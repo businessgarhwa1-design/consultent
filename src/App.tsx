@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ActivityLog,
   AppSettings,
@@ -17,6 +17,7 @@ import { hashPassword } from './utils/authCrypto';
 import { Navbar } from './components/Navbar';
 import { Sidebar, TabType } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
+import { ClientSelection } from './components/ClientSelection';
 import { ClientsList } from './components/ClientsList';
 import { MonthlyWork } from './components/MonthlyWork';
 import { FinancialYears } from './components/FinancialYears';
@@ -75,6 +76,35 @@ export default function App() {
   const [monthlyWorkSchemeFilter, setMonthlyWorkSchemeFilter] = useState('all');
   const [selectedBankClientId, setSelectedBankClientId] = useState<number | null>(null);
   const [selectedTurnoverClientId, setSelectedTurnoverClientId] = useState<number | null>(null);
+  const [activeClientId, setActiveClientId] = useState<number | null>(() => GSTStorage.getActiveClientId());
+  const activeClient = useMemo(
+    () => (activeClientId ? clients.find((c) => c.id === activeClientId) || null : null),
+    [clients, activeClientId]
+  );
+
+  const handleSelectActiveClient = (client: Client | null) => {
+    const id = client ? client.id : null;
+    setActiveClientId(id);
+    GSTStorage.setActiveClientId(id);
+    if (client) {
+      setSelectedBankClientId(client.id);
+      setSelectedTurnoverClientId(client.id);
+      showToast(`Active Client set to: ${client.firm_name}`);
+      GSTStorage.logActivity(
+        'CLIENT_SELECTED',
+        `Active client set to ${client.firm_name} (${client.gstin})`,
+        {
+          module: 'Client Selection',
+          clientId: client.id,
+          clientName: client.client_name,
+          firmName: client.firm_name,
+        }
+      );
+    } else {
+      showToast('Active Client deselected.');
+    }
+  };
+
   const [isRefreshingPortal, setIsRefreshingPortal] = useState(false);
 
   // Toasts
@@ -143,6 +173,9 @@ export default function App() {
           if (Array.isArray(res.data.bank_turnover) && res.data.bank_turnover.length > 0) {
             GSTStorage.mergeBankTurnoverFromCloud(res.data.bank_turnover);
           }
+          try {
+            window.dispatchEvent(new CustomEvent('bank-data-updated'));
+          } catch {}
           if (Array.isArray(res.data.users) && res.data.users.length > 0) {
             const mergedUsers = GSTStorage.mergeUsersFromCloud(res.data.users);
             setUsers(mergedUsers);
@@ -166,6 +199,9 @@ export default function App() {
       setFinancialYears(freshFY);
       setSettings(freshSettings);
       setUsers(freshUsers);
+      try {
+        window.dispatchEvent(new CustomEvent('bank-data-updated'));
+      } catch {}
     });
 
     // Subscribe to cross-device sync
@@ -810,6 +846,7 @@ export default function App() {
           clientCount={clients.length}
           pendingCount={pendingCount}
           inVisitsCount={inVisitsCount}
+          activeClientName={activeClient?.firm_name || null}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
         />
@@ -867,6 +904,28 @@ export default function App() {
                 onRefresh={handleRefreshPortal}
               />
             )
+          )}
+
+          {activeTab === 'client-selection' && (
+            <ClientSelection
+              clients={clients}
+              users={users}
+              currentUser={currentUser}
+              activeClient={activeClient}
+              onSelectActiveClient={handleSelectActiveClient}
+              onNavigateTab={(tab, targetClientId) => {
+                if (targetClientId) {
+                  setSelectedBankClientId(targetClientId);
+                  setSelectedTurnoverClientId(targetClientId);
+                }
+                setActiveTab(tab);
+              }}
+              onOpenEditClient={(client) => {
+                setEditingClient(client);
+                setIsAddClientModalOpen(true);
+              }}
+              onOpenViewClient={(client) => setViewingClient(client)}
+            />
           )}
 
           {activeTab === 'clients' && (
@@ -949,6 +1008,7 @@ export default function App() {
               initialSchemeFilter={monthlyWorkSchemeFilter}
               onExportCSV={handleExportMonthlyCSV}
               onRefresh={handleRefreshPortal}
+              activeClientId={activeClientId}
             />
           )}
 
@@ -959,7 +1019,7 @@ export default function App() {
               selectedFY={selectedFY}
               currentUser={currentUser}
               users={users}
-              initialClientId={selectedTurnoverClientId}
+              initialClientId={activeClientId || selectedTurnoverClientId || undefined}
               onSelectFY={handleSelectFY}
               onRefresh={handleRefreshPortal}
             />
@@ -971,7 +1031,7 @@ export default function App() {
               financialYears={financialYears}
               selectedFY={selectedFY}
               currentUser={currentUser}
-              initialClientId={selectedBankClientId}
+              initialClientId={activeClientId || selectedBankClientId || undefined}
               onSelectFY={handleSelectFY}
               onRefresh={handleRefreshPortal}
             />
@@ -986,6 +1046,7 @@ export default function App() {
               selectedMonth={selectedMonth}
               users={users}
               currentUser={currentUser}
+              initialClientId={activeClientId}
               onExportCSV={handleExportMonthlyCSV}
               onSelectFY={handleSelectFY}
             />
@@ -1059,6 +1120,7 @@ export default function App() {
               clients={clients}
               financialYears={financialYears}
               currentUser={currentUser}
+              initialClientId={activeClientId}
             />
           )}
 

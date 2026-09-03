@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronRight,
   Table,
+  UserCheck,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -32,6 +33,7 @@ interface SidebarProps {
   clientCount: number;
   pendingCount: number;
   inVisitsCount?: number;
+  activeClientName?: string | null;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -44,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   clientCount,
   pendingCount,
   inVisitsCount = 0,
+  activeClientName,
   isOpen,
   onClose,
 }) => {
@@ -51,6 +54,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const menuItems = [
     { id: 'dashboard' as TabType, label: 'Dashboard', icon: LayoutDashboard, badge: null },
+    {
+      id: 'client-selection' as TabType,
+      label: 'Client Selection',
+      icon: UserCheck,
+      badge: activeClientName ? 'Active' : null,
+      badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40',
+    },
     { id: 'clients' as TabType, label: 'Master Clients', icon: Users, badge: clientCount },
     {
       id: 'office-visits' as TabType,

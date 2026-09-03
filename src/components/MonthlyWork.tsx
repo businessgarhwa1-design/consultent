@@ -72,6 +72,7 @@ interface MonthlyWorkProps {
   initialViewMode?: 'monthly' | 'annual-matrix';
   onExportCSV?: () => void;
   onRefresh?: () => void;
+  activeClientId?: number | null;
 }
 
 const STATUS_OPTIONS: WorkStatus[] = [
@@ -129,12 +130,20 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
   initialViewMode = 'monthly',
   onExportCSV,
   onRefresh,
+  activeClientId,
 }) => {
   const [searchTerm, setSearchTerm] = useState(initialSearchQuery);
   const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
   const [staffFilter, setStaffFilter] = useState('all');
   const [schemeFilter, setSchemeFilter] = useState(initialSchemeFilter || 'all');
   const [workViewMode, setWorkViewMode] = useState<'monthly' | 'annual-matrix'>(initialViewMode);
+  const [isolateActiveClient, setIsolateActiveClient] = useState<boolean>(!!activeClientId);
+
+  useEffect(() => {
+    if (activeClientId) {
+      setIsolateActiveClient(true);
+    }
+  }, [activeClientId]);
 
   // Sync initial view mode when switching from sidebar submenu
   useEffect(() => {
@@ -284,6 +293,11 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
   // Filter clients
   const filteredClients = useMemo(() => {
     return activeClients.filter((client) => {
+      // Isolate to active client if selected
+      if (isolateActiveClient && activeClientId && client.id !== activeClientId) {
+        return false;
+      }
+
       // Search across File No, GSTIN, Firm Name, Client Name, Mobile 1, Mobile 2
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -329,7 +343,7 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
 
       return true;
     });
-  }, [activeClients, searchTerm, schemeFilter, staffFilter, statusFilter, workMap, draftStatuses]);
+  }, [activeClients, searchTerm, schemeFilter, staffFilter, statusFilter, workMap, draftStatuses, isolateActiveClient, activeClientId]);
 
   // Selection toggle handlers
   const handleToggleSelect = (clientId: number) => {
@@ -694,6 +708,37 @@ export const MonthlyWork: React.FC<MonthlyWorkProps> = ({
 
       {/* Filter Toolbar */}
       <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+        {isolateActiveClient && activeClientId && (
+          <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+            <div className="flex items-center gap-2 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>
+                Active Client Isolated: <strong>{clients.find((c) => c.id === activeClientId)?.firm_name || 'Active Client'}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsolateActiveClient(false)}
+              className="text-[11px] underline font-bold text-emerald-700 hover:text-emerald-900 cursor-pointer"
+            >
+              Show All Clients
+            </button>
+          </div>
+        )}
+        {!isolateActiveClient && activeClientId && (
+          <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+            <span>
+              Showing all clients. Active Client: <strong>{clients.find((c) => c.id === activeClientId)?.firm_name}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsolateActiveClient(true)}
+              className="text-[11px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+            >
+              Filter to Active Client Only
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           {/* Search by File No, GSTIN, Firm Name, Mobile */}
           <div className="relative flex-1 min-w-[240px]">

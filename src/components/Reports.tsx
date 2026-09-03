@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Client,
   FinancialYear,
@@ -48,6 +48,7 @@ interface ReportsProps {
   selectedMonth: string;
   users: User[];
   currentUser?: User;
+  initialClientId?: number | null;
   onExportCSV: () => void;
   onSelectFY?: (fy: FinancialYear) => void;
 }
@@ -60,13 +61,22 @@ export const Reports: React.FC<ReportsProps> = ({
   selectedMonth,
   users,
   currentUser,
+  initialClientId,
   onExportCSV,
   onSelectFY,
 }) => {
   // Navigation / Filter States
   const [reportFYId, setReportFYId] = useState<number>(selectedFY.id);
-  const [selectedClientId, setSelectedClientId] = useState<string>('all'); // 'all' or numeric client id
+  const [selectedClientId, setSelectedClientId] = useState<string>(
+    initialClientId ? String(initialClientId) : 'all'
+  ); // 'all' or numeric client id
   const [reportType, setReportType] = useState<ReportType>('combined');
+
+  useEffect(() => {
+    if (initialClientId) {
+      setSelectedClientId(String(initialClientId));
+    }
+  }, [initialClientId]);
   const [clientSearch, setClientSearch] = useState<string>('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'preview' | 'compliance_analytics' | 'hostinger_guide'>('preview');
