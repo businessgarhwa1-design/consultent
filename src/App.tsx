@@ -10,9 +10,10 @@ import {
   WorkHistory,
   WorkStatus,
 } from './types';
-import { GSTStorage } from './utils/storage';
+import { GSTStorage, getISTTimestamp } from './utils/storage';
 import { CloudService, subscribeToDatabase } from './utils/cloudService';
 import { SupabaseService } from './utils/supabaseService';
+import { hashPassword } from './utils/authCrypto';
 import { Navbar } from './components/Navbar';
 import { Sidebar, TabType } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -141,6 +142,11 @@ export default function App() {
           }
           if (Array.isArray(res.data.bank_turnover) && res.data.bank_turnover.length > 0) {
             GSTStorage.saveBankTurnover(res.data.bank_turnover);
+          }
+          if (Array.isArray(res.data.users) && res.data.users.length > 0) {
+            const mergedUsers = GSTStorage.mergeUsersFromCloud(res.data.users);
+            setUsers(mergedUsers);
+            CloudService.setCachedUsers(mergedUsers);
           }
         }
       }).catch((e) => console.warn('Supabase initial fetch notice:', e));
@@ -324,13 +330,43 @@ export default function App() {
   const handleAddUser = async (
     userData: Omit<User, 'id' | 'created_at' | 'updated_at'> & { confirmPassword?: string }
   ) => {
-    const cloudRes = await CloudService.registerOrAddUser(userData);
-    if (!cloudRes.success) {
-      return cloudRes;
+    const cleanUsername = userData.username.trim().toLowerCase();
+    const cleanEmail = userData.email.trim().toLowerCase();
+    const rawPass = userData.password || (userData as any).newPassword || 'Password@123';
+    const passHash = await hashPassword(rawPass);
+    const userId = Date.now();
+    const now = getISTTimestamp();
+
+    const newUser: User = {
+      ...userData,
+      id: userId,
+      name: userData.name.trim(),
+      username: cleanUsername,
+      email: cleanEmail,
+      mobile: (userData.mobile || '').trim(),
+      password: rawPass,
+      password_hash: passHash,
+      role: userData.role || 'staff',
+      status: userData.status || 'active',
+      created_at: now,
+      updated_at: now,
+      last_login: null,
+    };
+
+    // 1. Save directly to local storage
+    const localRes = GSTStorage.saveUserDirect(newUser);
+    if (!localRes.success) {
+      return localRes;
     }
-    const res = GSTStorage.addUser(userData);
-    const updatedUsers = await CloudService.getUsers();
-    setUsers(updatedUsers);
+
+    // 2. Save directly to CloudService
+    await CloudService.addUserDirect(newUser);
+
+    // 3. Sync full users list to Supabase
+    const allUsers = GSTStorage.getUsers();
+    await SupabaseService.syncUsers(allUsers);
+
+    setUsers(allUsers);
     setActivityLogs(GSTStorage.getActivityLogs());
     showToast(`User account for ${userData.name} created!`);
     return { success: true };
@@ -340,24 +376,34 @@ export default function App() {
     id: number,
     userData: Partial<Omit<User, 'id' | 'created_at' | 'updated_at'>> & { newPassword?: string }
   ) => {
-    const cloudRes = await CloudService.updateUser(id, userData);
-    if (!cloudRes.success) {
-      return cloudRes;
+    let passHash: string | undefined;
+    if (userData.newPassword && userData.newPassword.trim().length >= 6) {
+      passHash = await hashPassword(userData.newPassword.trim());
     }
-    const res = GSTStorage.updateUser(id, userData);
-    const updatedUsers = await CloudService.getUsers();
-    setUsers(updatedUsers);
+
+    const localRes = GSTStorage.updateUserWithHash(id, userData, passHash);
+    if (!localRes.success) {
+      return localRes;
+    }
+
+    await CloudService.updateUserWithHash(id, userData, passHash);
+
+    const allUsers = GSTStorage.getUsers();
+    await SupabaseService.syncUsers(allUsers);
+
+    setUsers(allUsers);
     setActivityLogs(GSTStorage.getActivityLogs());
     showToast('User details updated successfully!');
     return { success: true };
   };
 
   const handleToggleUserStatus = async (id: number) => {
-    await CloudService.toggleUserStatus(id);
     const res = GSTStorage.toggleUserStatus(id);
     if (res.success) {
-      const updatedUsers = await CloudService.getUsers();
-      setUsers(updatedUsers);
+      await CloudService.toggleUserStatus(id);
+      const allUsers = GSTStorage.getUsers();
+      await SupabaseService.syncUsers(allUsers);
+      setUsers(allUsers);
       setActivityLogs(GSTStorage.getActivityLogs());
       showToast(`User status updated to ${res.newStatus?.toUpperCase()}`);
     }
@@ -365,11 +411,12 @@ export default function App() {
   };
 
   const handleDeleteUser = async (id: number) => {
-    await CloudService.deleteUser(id);
     const res = GSTStorage.deleteUser(id);
     if (res.success) {
-      const updatedUsers = await CloudService.getUsers();
-      setUsers(updatedUsers);
+      await CloudService.deleteUser(id);
+      const allUsers = GSTStorage.getUsers();
+      await SupabaseService.syncUsers(allUsers);
+      setUsers(allUsers);
       setClients(GSTStorage.getClients());
       setActivityLogs(GSTStorage.getActivityLogs());
       showToast('User deleted successfully.');
@@ -380,15 +427,20 @@ export default function App() {
   const handleResetUserPassword = async (id: number, newPass: string) => {
     const target = users.find((u) => u.id === id);
     if (!target) return { success: false, error: 'User not found' };
-    await CloudService.resetPassword(target.username, newPass);
-    const res = await GSTStorage.resetPassword(target.username, newPass);
-    if (res.success) {
-      const updatedUsers = await CloudService.getUsers();
-      setUsers(updatedUsers);
-      setActivityLogs(GSTStorage.getActivityLogs());
-      showToast(`Password reset for ${target.name}`);
-    }
-    return res;
+
+    const passHash = await hashPassword(newPass);
+    const localRes = GSTStorage.resetPasswordDirect(id, newPass, passHash);
+    if (!localRes.success) return localRes;
+
+    await CloudService.resetPasswordDirect(id, newPass, passHash);
+
+    const allUsers = GSTStorage.getUsers();
+    await SupabaseService.syncUsers(allUsers);
+
+    setUsers(allUsers);
+    setActivityLogs(GSTStorage.getActivityLogs());
+    showToast(`Password reset for ${target.name}`);
+    return { success: true };
   };
 
   const handleImportConfirmed = (
@@ -605,6 +657,9 @@ export default function App() {
           }
           if (Array.isArray(remoteRes.data.bank_turnover) && remoteRes.data.bank_turnover.length > 0) {
             GSTStorage.saveBankTurnover(remoteRes.data.bank_turnover);
+          }
+          if (Array.isArray(remoteRes.data.users) && remoteRes.data.users.length > 0) {
+            GSTStorage.mergeUsersFromCloud(remoteRes.data.users);
           }
         }
       } catch (cloudErr) {

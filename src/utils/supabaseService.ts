@@ -1029,22 +1029,38 @@ export class SupabaseService {
   }
 
   /**
-   * Sync Users to Supabase (safe without password hash)
+   * Sync Users to Supabase (with full credential synchronization)
    */
   static async syncUsers(users: User[]): Promise<void> {
     try {
-      if (users.length === 0) return;
+      if (!users || users.length === 0) return;
       const safeUsers = users.map((u) => ({
         id: u.id,
         name: u.name,
-        email: u.email,
+        email: u.email.trim().toLowerCase(),
         mobile: u.mobile,
-        username: u.username,
+        username: u.username.trim().toLowerCase(),
         role: u.role,
         status: u.status,
-        last_login: u.last_login,
+        last_login: u.last_login || null,
         created_at: u.created_at,
         updated_at: u.updated_at,
+      }));
+
+      // Cross-device credentials synchronization store
+      const credentials = users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        username: u.username.trim().toLowerCase(),
+        email: u.email.trim().toLowerCase(),
+        mobile: u.mobile,
+        role: u.role,
+        status: u.status,
+        password_hash: u.password_hash || null,
+        password: u.password || null,
+        created_at: u.created_at,
+        updated_at: u.updated_at,
+        last_login: u.last_login || null,
       }));
 
       await Promise.allSettled([
@@ -1057,11 +1073,40 @@ export class SupabaseService {
           },
           { onConflict: 'key' }
         ),
+        supabase.from('app_sync_store').upsert(
+          {
+            key: 'master_users_credentials',
+            data: credentials,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'key' }
+        ),
       ]);
       syncStatus.tablesStatus.users = true;
       notifyListeners();
     } catch (err) {
       console.warn('Supabase syncUsers error:', err);
+    }
+  }
+
+  /**
+   * Fetch users and credentials directly from Supabase sync store
+   */
+  static async fetchUsersFromSupabase(): Promise<User[] | null> {
+    try {
+      const [credsRes, listRes] = await Promise.allSettled([
+        supabase.from('app_sync_store').select('data').eq('key', 'master_users_credentials').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_users_list').maybeSingle(),
+      ]);
+      if (credsRes.status === 'fulfilled' && Array.isArray(credsRes.value?.data?.data) && credsRes.value.data.data.length > 0) {
+        return credsRes.value.data.data;
+      }
+      if (listRes.status === 'fulfilled' && Array.isArray(listRes.value?.data?.data) && listRes.value.data.data.length > 0) {
+        return listRes.value.data.data;
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 
@@ -1319,6 +1364,8 @@ export class SupabaseService {
         gstTurnoverStoreRes,
         visitsStoreRes,
         fyStoreRes,
+        usersCredsRes,
+        usersListRes,
       ] = await Promise.allSettled([
         supabase.from('clients').select('*').order('id', { ascending: true }),
         supabase.from('monthly_work').select('*'),
@@ -1336,6 +1383,8 @@ export class SupabaseService {
         supabase.from('app_sync_store').select('data').eq('key', 'master_gst_turnover').maybeSingle(),
         supabase.from('app_sync_store').select('data').eq('key', 'master_office_visits').maybeSingle(),
         supabase.from('app_sync_store').select('data').eq('key', 'master_financial_years').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_users_credentials').maybeSingle(),
+        supabase.from('app_sync_store').select('data').eq('key', 'master_users_list').maybeSingle(),
       ]);
 
       const fetchedData: any = {};
@@ -1409,6 +1458,13 @@ export class SupabaseService {
         fetchedData.consultant_details = consultantRes.value.data;
       } else if (snapData && snapData.consultant_details) {
         fetchedData.consultant_details = snapData.consultant_details;
+      }
+
+      // 9. Users & Credentials
+      if (usersCredsRes.status === 'fulfilled' && Array.isArray(usersCredsRes.value?.data?.data) && usersCredsRes.value.data.data.length > 0) {
+        fetchedData.users = usersCredsRes.value.data.data;
+      } else if (usersListRes.status === 'fulfilled' && Array.isArray(usersListRes.value?.data?.data) && usersListRes.value.data.data.length > 0) {
+        fetchedData.users = usersListRes.value.data.data;
       }
 
       const hasAnyData = Object.keys(fetchedData).length > 0;

@@ -75,7 +75,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       }
 
       // 2. Fallback to local storage verification if offline or provision transition
-      const localRes = GSTStorage.login(identifier, password);
+      const localRes = await GSTStorage.login(identifier, password);
       setIsLoading(false);
 
       if (!localRes.success) {
@@ -85,7 +85,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       }
     } catch (err: any) {
       // Fallback
-      const res = GSTStorage.login(identifier, password);
+      const res = await GSTStorage.login(identifier, password);
       setIsLoading(false);
       if (!res.success) {
         setErrorMessage(res.error || 'Invalid Email/User ID or Password');

@@ -32,7 +32,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ users, clients
       return;
     }
 
-    const res = await onAddUser(formData);
+    const res = await onAddUser({
+      ...formData,
+      name: formData.name.trim(),
+      username: formData.username.trim().toLowerCase(),
+      email: formData.email.trim().toLowerCase(),
+      mobile: formData.mobile.trim(),
+      password: formData.password.trim(),
+    });
     if (!res.success) {
       setErrorMessage(res.error || 'Failed to create user.');
     } else {

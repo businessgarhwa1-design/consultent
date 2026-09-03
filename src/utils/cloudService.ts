@@ -52,6 +52,7 @@ import {
   validatePasswordStrength,
 } from './authCrypto';
 import { getISTTimestamp, sanitizeAuditValues } from './storage';
+import { SupabaseService } from './supabaseService';
 
 // Standardized Operation Types & Error Handling
 export enum OperationType {
@@ -827,8 +828,40 @@ export class CloudService {
   // ==========================================
   // AUTHENTICATION & MULTI-DEVICE USER METHODS
   // ==========================================
+  // USERS CLOUD & SYNC OPERATIONS
+  // ==========================================
+
+  static setCachedUsers(users: User[]) {
+    cloudUsers = [...users];
+    notifySubscribers();
+  }
 
   static async getUsers(): Promise<User[]> {
+    // Ensure local created users are always included even during cloud quota outage
+    try {
+      if (typeof window !== 'undefined') {
+        const localRaw = localStorage.getItem('gst_app_users_v1');
+        if (localRaw) {
+          const localList = JSON.parse(localRaw);
+          if (Array.isArray(localList) && localList.length > 0) {
+            const map = new Map<string, User>();
+            for (const u of cloudUsers) map.set(u.username.toLowerCase(), u);
+            for (const lu of localList) {
+              const k = lu.username.toLowerCase();
+              if (!map.has(k)) {
+                map.set(k, lu);
+              } else {
+                map.set(k, { ...map.get(k)!, ...lu });
+              }
+            }
+            cloudUsers = Array.from(map.values());
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     if (isFirestoreQuotaExceeded) {
       return cloudUsers;
     }
@@ -851,7 +884,7 @@ export class CloudService {
     password: string
   ): Promise<{ success: boolean; error?: string; user?: User }> {
     const input = identifier.trim().toLowerCase();
-    const users = await this.getUsers();
+    let users = await this.getUsers();
 
     let user = users.find(
       (u) =>
@@ -860,6 +893,36 @@ export class CloudService {
         (input === 'admin' && u.username.toLowerCase() === 'admin123') ||
         (input === 'admin123' && u.username.toLowerCase() === 'admin')
     );
+
+    // If not found in memory, try fetching latest sync store from Supabase
+    if (!user) {
+      try {
+        const remoteUsers = await SupabaseService.fetchUsersFromSupabase();
+        if (remoteUsers && remoteUsers.length > 0) {
+          const map = new Map<string, User>();
+          for (const u of users) map.set(u.username.toLowerCase(), u);
+          for (const ru of remoteUsers) {
+            const k = ru.username.toLowerCase();
+            if (!map.has(k)) {
+              map.set(k, ru);
+            } else {
+              map.set(k, { ...map.get(k)!, ...ru });
+            }
+          }
+          users = Array.from(map.values());
+          cloudUsers = users;
+          user = users.find(
+            (u) =>
+              u.username.toLowerCase() === input ||
+              u.email.toLowerCase() === input ||
+              (input === 'admin' && u.username.toLowerCase() === 'admin123') ||
+              (input === 'admin123' && u.username.toLowerCase() === 'admin')
+          );
+        }
+      } catch {
+        // continue
+      }
+    }
 
     // If users list is empty or admin not found, fallback to initialUsers admin
     if (!user && (input === 'admin' || input === 'admin123' || input === 'admin@consultant.in')) {
@@ -882,10 +945,11 @@ export class CloudService {
         password === 'admin123' ||
         password === 'admin@123');
 
-    const isValid =
-      (await verifyPassword(password, user.password_hash)) ||
-      (await verifyPassword(password, user.password)) ||
-      isAdminPass;
+    const isHashValid = user.password_hash ? await verifyPassword(password, user.password_hash) : false;
+    const isPlainValid = user.password ? await verifyPassword(password, user.password) : false;
+    const isDefaultPass = (!user.password && !user.password_hash) && (password === 'Password@123');
+
+    const isValid = isHashValid || isPlainValid || isAdminPass || isDefaultPass;
 
     if (!isValid) {
       return { success: false, error: 'Invalid Email/User ID or Password' };
@@ -906,29 +970,106 @@ export class CloudService {
     return { success: true, user };
   }
 
+  static async addUserDirect(user: User): Promise<{ success: boolean; user: User }> {
+    const cleanUsername = user.username.trim().toLowerCase();
+    const idx = cloudUsers.findIndex((u) => u.id === user.id || u.username.toLowerCase() === cleanUsername);
+    if (idx !== -1) {
+      cloudUsers[idx] = { ...cloudUsers[idx], ...user };
+    } else {
+      cloudUsers.push(user);
+    }
+    notifySubscribers();
+
+    if (!isFirestoreQuotaExceeded) {
+      try {
+        await setDoc(doc(db, COLLECTIONS.USERS, String(user.id)), cleanForFirestore(user));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `${COLLECTIONS.USERS}/${user.id}`);
+      }
+    }
+    return { success: true, user };
+  }
+
+  static async updateUserWithHash(
+    id: number,
+    userData: Partial<User>,
+    passHash?: string
+  ): Promise<{ success: boolean }> {
+    const idx = cloudUsers.findIndex((u) => u.id === id);
+    const updates: any = {
+      ...userData,
+      updated_at: getISTTimestamp(),
+    };
+    if (passHash) {
+      updates.password_hash = passHash;
+    }
+    if (idx !== -1) {
+      cloudUsers[idx] = { ...cloudUsers[idx], ...updates };
+      notifySubscribers();
+    }
+
+    if (!isFirestoreQuotaExceeded) {
+      try {
+        await updateDoc(doc(db, COLLECTIONS.USERS, String(id)), cleanForFirestore(updates));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.USERS}/${id}`);
+      }
+    }
+    return { success: true };
+  }
+
+  static async resetPasswordDirect(
+    id: number,
+    newPassword: string,
+    passHash: string
+  ): Promise<{ success: boolean }> {
+    const idx = cloudUsers.findIndex((u) => u.id === id);
+    const updates = {
+      password: newPassword,
+      password_hash: passHash,
+      updated_at: getISTTimestamp(),
+    };
+    if (idx !== -1) {
+      cloudUsers[idx] = { ...cloudUsers[idx], ...updates };
+      notifySubscribers();
+    }
+
+    if (!isFirestoreQuotaExceeded) {
+      try {
+        await updateDoc(doc(db, COLLECTIONS.USERS, String(id)), cleanForFirestore(updates));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `${COLLECTIONS.USERS}/${id}`);
+      }
+    }
+    return { success: true };
+  }
+
   static async registerOrAddUser(
-    userData: Omit<User, 'id' | 'created_at' | 'updated_at'> & { newPassword?: string }
+    userData: Omit<User, 'id' | 'created_at' | 'updated_at'> & { id?: number; newPassword?: string; password?: string }
   ): Promise<{ success: boolean; error?: string; user?: User }> {
     const users = await this.getUsers();
+    const cleanUsername = userData.username.trim().toLowerCase();
+    const cleanEmail = userData.email.trim().toLowerCase();
 
-    if (users.some((u) => u.username.toLowerCase() === userData.username.toLowerCase())) {
+    if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
       return { success: false, error: `Username "${userData.username}" is already taken.` };
     }
 
-    if (users.some((u) => u.email.toLowerCase() === userData.email.toLowerCase())) {
+    if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: `Email "${userData.email}" is already registered.` };
     }
 
     const now = getISTTimestamp();
-    const rawPass = userData.newPassword || (userData as any).password || 'Password@123';
+    const rawPass = userData.newPassword || userData.password || (userData as any).password || 'Password@123';
     const passHash = await hashPassword(rawPass);
 
     const newUser: User = {
-      id: Date.now(),
+      id: userData.id || Date.now(),
       name: userData.name.trim(),
-      email: userData.email.trim(),
+      email: cleanEmail,
       mobile: userData.mobile.trim(),
-      username: userData.username.trim(),
+      username: cleanUsername,
+      password: rawPass,
       password_hash: passHash,
       role: userData.role || 'staff',
       status: userData.status || 'active',

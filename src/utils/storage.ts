@@ -43,6 +43,7 @@ import {
   generateSecureToken,
   hashToken,
   hashPassword,
+  verifyPassword,
   validatePasswordStrength,
 } from './authCrypto';
 import { CloudService } from './cloudService';
@@ -209,6 +210,60 @@ export class GSTStorage {
   static saveUsers(users: User[]) {
     safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     SupabaseService.syncUsers(users).catch((e) => console.warn('Supabase sync users error:', e));
+  }
+
+  static mergeUsersFromCloud(cloudUsersList: User[]): User[] {
+    const localUsers = this.getUsers();
+    const map = new Map<string, User>();
+
+    // Add local users first
+    for (const u of localUsers) {
+      map.set(u.username.toLowerCase(), { ...u });
+    }
+
+    // Merge in cloud users, preserving any local password/hash if cloud lacks it
+    for (const cu of cloudUsersList) {
+      const key = cu.username.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, { ...cu });
+      } else {
+        const existing = map.get(key)!;
+        map.set(key, {
+          ...existing,
+          ...cu,
+          // Retain password & hash if already present locally
+          password: cu.password || existing.password,
+          password_hash: cu.password_hash || existing.password_hash,
+          last_login: cu.last_login || existing.last_login,
+        });
+      }
+    }
+
+    const merged = Array.from(map.values());
+    safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+    return merged;
+  }
+
+  static saveUserDirect(user: User): { success: boolean; error?: string } {
+    const users = this.getUsers();
+    const cleanUsername = user.username.trim().toLowerCase();
+
+    const existingIdx = users.findIndex((u) => u.id === user.id || u.username.toLowerCase() === cleanUsername);
+    if (existingIdx !== -1) {
+      users[existingIdx] = { ...users[existingIdx], ...user };
+    } else {
+      users.push(user);
+    }
+    this.saveUsers(users);
+
+    this.logActivity('CREATE', `Created ${user.role.toUpperCase()} user: ${user.name} (${user.username})`, {
+      module: 'User Management',
+      recordId: user.id,
+      newValues: sanitizeAuditValues(user),
+      description: `Created new ${user.role} account for ${user.name} (Email: ${user.email})`,
+    });
+
+    return { success: true };
   }
 
   static getClients(): Client[] {
@@ -523,9 +578,12 @@ export class GSTStorage {
     }
   }
 
-  static login(identifier: string, password: string): { success: boolean; error?: string; user?: User } {
+  static async login(
+    identifier: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string; user?: User }> {
     const input = identifier.trim().toLowerCase();
-    const users = this.getUsers();
+    let users = this.getUsers();
     
     // Find user by username or email (with aliases)
     let user = users.find(
@@ -536,7 +594,27 @@ export class GSTStorage {
         (input === 'admin123' && u.username.toLowerCase() === 'admin')
     );
 
-    // Fallback if users empty
+    // If not found locally, attempt to fetch from Supabase sync store
+    if (!user) {
+      try {
+        const remoteUsers = await SupabaseService.fetchUsersFromSupabase();
+        if (remoteUsers && remoteUsers.length > 0) {
+          const merged = this.mergeUsersFromCloud(remoteUsers);
+          users = merged;
+          user = users.find(
+            (u) =>
+              u.username.toLowerCase() === input ||
+              u.email.toLowerCase() === input ||
+              (input === 'admin' && u.username.toLowerCase() === 'admin123') ||
+              (input === 'admin123' && u.username.toLowerCase() === 'admin')
+          );
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // Fallback if users empty and admin is logging in
     if (!user && (input === 'admin' || input === 'admin123' || input === 'admin@consultant.in')) {
       user = initialUsers.find((u) => u.role === 'admin') || initialUsers[0];
     }
@@ -576,14 +654,12 @@ export class GSTStorage {
         password === 'admin123' ||
         password === 'admin@123');
 
-    // In demo environment, accept 'Password@123', 'admin', 'admin123', or the stored user's password/hash default
-    const validPassword = 
-      password === 'Password@123' ||
-      password === 'admin' ||
-      password === 'admin123' ||
-      password === 'admin@123' ||
-      password === user.password ||
-      isAdminPass;
+    // Secure verification: check password hash, direct string, or admin fallback
+    const isHashValid = user.password_hash ? await verifyPassword(password, user.password_hash) : false;
+    const isPlainValid = user.password ? await verifyPassword(password, user.password) : false;
+    const isDefaultPass = (!user.password && !user.password_hash) && (password === 'Password@123');
+
+    const validPassword = isHashValid || isPlainValid || isAdminPass || isDefaultPass;
 
     if (!validPassword) {
       this.logActivity('LOGIN_FAILED', `Incorrect password attempt for user "${user.username}"`, {
@@ -810,7 +886,7 @@ export class GSTStorage {
     const passHash = await hashPassword(newPassword);
     const now = getISTTimestamp();
 
-    users[userIdx].password = undefined; // Wipe plaintext password
+    users[userIdx].password = newPassword;
     users[userIdx].password_hash = passHash;
     users[userIdx].updated_at = now;
     this.saveUsers(users);
@@ -888,6 +964,88 @@ export class GSTStorage {
       newValues: newClean,
       changedFields,
       description: `Modified profile attributes for user ${users[index].name} (${users[index].username})`,
+    });
+    return { success: true };
+  }
+
+  static updateUserWithHash(
+    id: number,
+    userData: Partial<Omit<User, 'id' | 'created_at' | 'updated_at'>> & { newPassword?: string },
+    passHash?: string
+  ): { success: boolean; error?: string } {
+    const users = this.getUsers();
+    const index = users.findIndex((u) => u.id === id);
+    if (index === -1) {
+      return { success: false, error: 'User not found.' };
+    }
+
+    if (userData.username && userData.username.toLowerCase() !== users[index].username.toLowerCase()) {
+      if (users.some((u) => u.id !== id && u.username.toLowerCase() === userData.username!.toLowerCase())) {
+        return { success: false, error: `Username "${userData.username}" is already taken.` };
+      }
+    }
+    if (userData.email && userData.email.toLowerCase() !== users[index].email.toLowerCase()) {
+      if (users.some((u) => u.id !== id && u.email.toLowerCase() === userData.email!.toLowerCase())) {
+        return { success: false, error: `Email "${userData.email}" is already registered.` };
+      }
+    }
+
+    const previousUser = { ...users[index] };
+    const now = getISTTimestamp();
+    users[index] = {
+      ...users[index],
+      name: userData.name ?? users[index].name,
+      email: userData.email ? userData.email.trim().toLowerCase() : users[index].email,
+      mobile: userData.mobile ?? users[index].mobile,
+      username: userData.username ? userData.username.trim().toLowerCase() : users[index].username,
+      role: userData.role ?? users[index].role,
+      status: userData.status ?? users[index].status,
+      password: userData.newPassword ? userData.newPassword : users[index].password,
+      password_hash: passHash ? passHash : users[index].password_hash,
+      updated_at: now,
+    };
+
+    this.saveUsers(users);
+
+    const oldClean = sanitizeAuditValues(previousUser);
+    const newClean = sanitizeAuditValues(users[index]);
+    const changedFields = Object.keys(userData).filter((k) => k !== 'newPassword' && (previousUser as any)[k] !== (users[index] as any)[k]);
+    if (userData.newPassword) changedFields.push('password');
+
+    this.logActivity('EDIT', `Updated user profile of ${users[index].name} (${users[index].username})`, {
+      module: 'User Management',
+      recordId: id,
+      oldValues: oldClean,
+      newValues: newClean,
+      changedFields,
+      description: `Modified profile attributes for user ${users[index].name} (${users[index].username})`,
+    });
+    return { success: true };
+  }
+
+  static resetPasswordDirect(
+    id: number,
+    newPassword: string,
+    passHash: string
+  ): { success: boolean; error?: string } {
+    const users = this.getUsers();
+    const index = users.findIndex((u) => u.id === id);
+    if (index === -1) {
+      return { success: false, error: 'User not found.' };
+    }
+
+    const now = getISTTimestamp();
+    users[index].password = newPassword;
+    users[index].password_hash = passHash;
+    users[index].updated_at = now;
+    this.saveUsers(users);
+
+    this.logActivity('PASSWORD_RESET', `Password reset for user ${users[index].username}`, {
+      module: 'User Management',
+      userId: id,
+      userName: users[index].name,
+      userRole: users[index].role,
+      description: `Admin reset password for account ${users[index].username}`,
     });
     return { success: true };
   }
@@ -1350,33 +1508,50 @@ export class GSTStorage {
     return { success: true, fy: newFy };
   }
 
-  static addUser(userData: Omit<User, 'id' | 'created_at' | 'updated_at'>): { success: boolean; error?: string } {
+  static addUser(
+    userData: Omit<User, 'id' | 'created_at' | 'updated_at'> & {
+      id?: number;
+      password?: string;
+      password_hash?: string;
+    }
+  ): { success: boolean; error?: string; user?: User } {
     const users = this.getUsers();
-    if (users.some((u) => u.username.toLowerCase() === userData.username.toLowerCase())) {
+    const cleanUsername = userData.username.trim().toLowerCase();
+    const cleanEmail = userData.email.trim().toLowerCase();
+
+    if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
       return { success: false, error: 'Username is already taken.' };
     }
-    if (users.some((u) => u.email.toLowerCase() === userData.email.toLowerCase())) {
+    if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
       return { success: false, error: 'Email is already registered.' };
     }
 
     const now = getISTTimestamp();
     const newUser: User = {
       ...userData,
-      id: Date.now(),
+      id: userData.id || Date.now(),
+      name: userData.name.trim(),
+      username: cleanUsername,
+      email: cleanEmail,
+      mobile: userData.mobile.trim(),
+      password: userData.password || 'Password@123',
+      password_hash: userData.password_hash,
+      role: userData.role || 'staff',
+      status: userData.status || 'active',
       created_at: now,
       updated_at: now,
     };
     users.push(newUser);
     this.saveUsers(users);
 
-    this.logActivity('CREATE', `Created ${userData.role.toUpperCase()} user: ${userData.name} (${userData.username})`, {
+    this.logActivity('CREATE', `Created ${userData.role.toUpperCase()} user: ${userData.name} (${cleanUsername})`, {
       module: 'User Management',
       recordId: newUser.id,
       newValues: sanitizeAuditValues(newUser),
-      description: `Created new ${userData.role} staff account for ${userData.name} (Email: ${userData.email})`,
+      description: `Created new ${userData.role} account for ${userData.name} (Email: ${cleanEmail})`,
     });
 
-    return { success: true };
+    return { success: true, user: newUser };
   }
 
   // ==========================================
