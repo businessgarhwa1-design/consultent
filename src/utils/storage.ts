@@ -1566,6 +1566,39 @@ export class GSTStorage {
     return safeParse<ClientBankAccount[]>(raw, initialBankAccounts);
   }
 
+  static saveBankAccountsLocally(accounts: ClientBankAccount[]) {
+    safeSetItem(STORAGE_KEYS.BANK_ACCOUNTS, JSON.stringify(accounts));
+  }
+
+  static mergeBankAccountsFromCloud(cloudAccounts: ClientBankAccount[]): ClientBankAccount[] {
+    const local = this.getBankAccounts();
+    const accountMap = new Map<string, ClientBankAccount>();
+
+    // First populate from local storage
+    local.forEach((acc) => {
+      accountMap.set(`${acc.client_id}_${acc.slot_number}`, acc);
+    });
+
+    // Merge cloud accounts: if cloud account is newer or does not exist locally, merge it
+    cloudAccounts.forEach((cAcc) => {
+      const key = `${cAcc.client_id}_${cAcc.slot_number}`;
+      const existing = accountMap.get(key);
+      if (!existing) {
+        accountMap.set(key, cAcc);
+      } else {
+        const localTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+        const cloudTime = new Date(cAcc.updated_at || cAcc.created_at || 0).getTime();
+        if (cloudTime >= localTime) {
+          accountMap.set(key, { ...existing, ...cAcc });
+        }
+      }
+    });
+
+    const merged = Array.from(accountMap.values());
+    this.saveBankAccountsLocally(merged);
+    return merged;
+  }
+
   static saveBankAccounts(accounts: ClientBankAccount[]) {
     safeSetItem(STORAGE_KEYS.BANK_ACCOUNTS, JSON.stringify(accounts));
     CloudService.batchSyncBankAccountsToCloud(accounts).catch((e) => console.warn('Cloud sync bank accounts error:', e));
@@ -1757,6 +1790,39 @@ export class GSTStorage {
     return safeParse<ClientBankTurnover[]>(raw, initialBankTurnover);
   }
 
+  static saveBankTurnoverLocally(turnoverList: ClientBankTurnover[]) {
+    safeSetItem(STORAGE_KEYS.BANK_TURNOVER, JSON.stringify(turnoverList));
+  }
+
+  static mergeBankTurnoverFromCloud(cloudTurnovers: ClientBankTurnover[]): ClientBankTurnover[] {
+    const local = this.getBankTurnover();
+    const turnoverMap = new Map<string, ClientBankTurnover>();
+
+    // First populate from local storage
+    local.forEach((t) => {
+      turnoverMap.set(`${t.client_id}_${t.bank_account_id}_${t.financial_year_id}_${t.month}`, t);
+    });
+
+    // Merge cloud turnover: if cloud turnover is newer or does not exist locally, merge it
+    cloudTurnovers.forEach((cTurn) => {
+      const key = `${cTurn.client_id}_${cTurn.bank_account_id}_${cTurn.financial_year_id}_${cTurn.month}`;
+      const existing = turnoverMap.get(key);
+      if (!existing) {
+        turnoverMap.set(key, cTurn);
+      } else {
+        const localTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+        const cloudTime = new Date(cTurn.updated_at || cTurn.created_at || 0).getTime();
+        if (cloudTime >= localTime) {
+          turnoverMap.set(key, { ...existing, ...cTurn });
+        }
+      }
+    });
+
+    const merged = Array.from(turnoverMap.values());
+    this.saveBankTurnoverLocally(merged);
+    return merged;
+  }
+
   static saveBankTurnover(turnoverList: ClientBankTurnover[]) {
     safeSetItem(STORAGE_KEYS.BANK_TURNOVER, JSON.stringify(turnoverList));
     CloudService.batchSyncBankTurnoverToCloud(turnoverList).catch((e) => console.warn('Cloud sync bank turnover error:', e));
@@ -1777,7 +1843,7 @@ export class GSTStorage {
     const all = this.getBankTurnover();
     const now = getISTTimestamp();
 
-    // Fetch old records to calculate diff
+    // Fetch old records to calculate diff and preserve stable record IDs
     const oldRecords = all.filter(
       (t) => t.client_id === clientId && t.bank_account_id === bankAccountId && t.financial_year_id === fyId
     );
@@ -1786,7 +1852,7 @@ export class GSTStorage {
       oldValues[r.month] = r.turnover_amount;
     });
 
-    // Remove existing turnover for this client + bank_account + FY to prevent duplicates
+    // Remove existing turnover for this client + bank_account + FY
     const filtered = all.filter(
       (t) => !(t.client_id === clientId && t.bank_account_id === bankAccountId && t.financial_year_id === fyId)
     );
@@ -1794,21 +1860,22 @@ export class GSTStorage {
     const newValues: Record<string, number> = {};
     const changedMonths: string[] = [];
 
-    // Insert new valid rows
+    // Insert updated rows while preserving deterministic IDs for existing months
     Object.entries(monthlyAmounts).forEach(([month, amount]) => {
       const numAmount = Number(amount) || 0;
       newValues[month] = numAmount;
       if ((oldValues[month] ?? 0) !== numAmount) {
         changedMonths.push(month);
       }
+      const existingRec = oldRecords.find((r) => r.month === month);
       filtered.push({
-        id: Date.now() + Math.floor(Math.random() * 100000),
+        id: existingRec ? existingRec.id : (Date.now() + Math.floor(Math.random() * 100000)),
         client_id: clientId,
         bank_account_id: bankAccountId,
         financial_year_id: fyId,
         month,
         turnover_amount: numAmount,
-        created_at: now,
+        created_at: existingRec?.created_at || now,
         updated_at: now,
       });
     });

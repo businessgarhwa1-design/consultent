@@ -12,6 +12,7 @@ import {
   BankAccountStatus,
 } from '../types';
 import { GSTStorage } from '../utils/storage';
+import { SupabaseService } from '../utils/supabaseService';
 import {
   Landmark,
   Building,
@@ -218,7 +219,6 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     setSaveStatus(`Saved turnover for Slot #${account.slot_number} (${account.bank_name})!`);
     setTimeout(() => setSaveStatus(null), 3500);
     loadData();
-    if (onRefresh) onRefresh();
   };
 
   // Save all accounts at once
@@ -240,7 +240,6 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     setSaveStatus(`All ${bankAccounts.length} Bank Account(s) saved successfully for FY ${selectedFY.display_name}!`);
     setTimeout(() => setSaveStatus(null), 4000);
     loadData();
-    if (onRefresh) onRefresh();
   };
 
   // Open slot editor
@@ -294,7 +293,6 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     setSaveStatus(`Bank Account Slot #${slotForm.slot_number} configured successfully.`);
     setTimeout(() => setSaveStatus(null), 3000);
     loadData();
-    if (onRefresh) onRefresh();
   };
 
   // Delete slot account
@@ -306,7 +304,6 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     ) {
       GSTStorage.deleteClientBankAccount(accountId);
       loadData();
-      if (onRefresh) onRefresh();
     }
   };
 
@@ -400,12 +397,22 @@ export const BankTurnover: React.FC<BankTurnoverProps> = ({
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
-  const handleRefreshTurnover = () => {
+  const handleRefreshTurnover = async () => {
     setIsRefreshing(true);
-    loadData();
-    if (onRefresh) {
-      onRefresh();
+    try {
+      const remoteRes = await SupabaseService.fetchAllProjectDataFromSupabase();
+      if (remoteRes.success && remoteRes.data) {
+        if (Array.isArray(remoteRes.data.bank_accounts) && remoteRes.data.bank_accounts.length > 0) {
+          GSTStorage.mergeBankAccountsFromCloud(remoteRes.data.bank_accounts);
+        }
+        if (Array.isArray(remoteRes.data.bank_turnover) && remoteRes.data.bank_turnover.length > 0) {
+          GSTStorage.mergeBankTurnoverFromCloud(remoteRes.data.bank_turnover);
+        }
+      }
+    } catch (e) {
+      console.warn('Refresh turnover fetch error:', e);
     }
+    loadData();
     setSaveStatus(`Bank turnover data refreshed for FY ${selectedFY.display_name}.`);
     setTimeout(() => {
       setIsRefreshing(false);

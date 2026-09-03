@@ -392,11 +392,22 @@ export class SupabaseService {
    */
   static async deleteBankAccount(accountId: number): Promise<void> {
     try {
+      const remainingAccounts = GSTStorage.getBankAccounts().filter((a) => a.id !== accountId);
+      const remainingTurnovers = GSTStorage.getBankTurnover().filter((t) => t.bank_account_id !== accountId);
+
       await Promise.allSettled([
         supabase.from('bank_accounts').delete().eq('id', accountId),
         supabase.from('bank_turnover').delete().eq('bank_account_id', accountId),
-        supabase.from('app_sync_store').delete().eq('key', 'complete_gst_portal_snapshot'),
-        supabase.from('app_sync_store').delete().eq('key', 'master_bank_accounts'),
+        supabase.from('app_sync_store').upsert({
+          key: 'master_bank_accounts',
+          data: remainingAccounts,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'key' }),
+        supabase.from('app_sync_store').upsert({
+          key: 'master_bank_turnover',
+          data: remainingTurnovers,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'key' }),
       ]);
     } catch (err) {
       console.warn('Supabase deleteBankAccount error:', err);
@@ -520,8 +531,32 @@ export class SupabaseService {
   static async syncBankAccounts(accounts: ClientBankAccount[]): Promise<void> {
     try {
       if (accounts.length === 0) return;
+      const mappedForDb = accounts.map((a) => {
+        const metadata = {
+          account_holder_name: a.account_holder_name || '',
+          status: a.status || 'active',
+          current_fy_id: a.current_fy_id || null,
+          deactivated_in_fy_id: a.deactivated_in_fy_id || null,
+          deactivated_fy_start_year: a.deactivated_fy_start_year || null,
+          deactivated_fy_name: a.deactivated_fy_name || null,
+        };
+        return {
+          id: a.id,
+          client_id: a.client_id,
+          slot_number: a.slot_number,
+          bank_name: a.bank_name || '',
+          account_number: a.account_number || '',
+          ifsc_code: a.ifsc || '',
+          branch_name: null,
+          account_type: a.account_type || 'Current',
+          is_primary: a.slot_number === 1,
+          notes: JSON.stringify(metadata),
+          updated_at: new Date().toISOString(),
+        };
+      });
+
       await Promise.allSettled([
-        supabase.from('bank_accounts').upsert(accounts, { onConflict: 'id' }),
+        supabase.from('bank_accounts').upsert(mappedForDb, { onConflict: 'id' }),
         supabase.from('app_sync_store').upsert(
           {
             key: 'master_bank_accounts',
@@ -544,8 +579,21 @@ export class SupabaseService {
   static async syncBankTurnover(turnoverList: ClientBankTurnover[]): Promise<void> {
     try {
       if (turnoverList.length === 0) return;
+      const mappedForDb = turnoverList.map((t) => ({
+        id: t.id,
+        client_id: t.client_id,
+        financial_year_id: t.financial_year_id,
+        month: t.month,
+        bank_account_id: t.bank_account_id,
+        turnover_amount: Number(t.turnover_amount) || 0,
+        credit_count: 0,
+        debit_count: 0,
+        remark: null,
+        updated_at: new Date().toISOString(),
+      }));
+
       await Promise.allSettled([
-        supabase.from('bank_turnover').upsert(turnoverList, { onConflict: 'id' }),
+        supabase.from('bank_turnover').upsert(mappedForDb, { onConflict: 'id' }),
         supabase.from('app_sync_store').upsert(
           {
             key: 'master_bank_turnover',
@@ -1427,22 +1475,67 @@ export class SupabaseService {
       }
 
       // 5. Bank Turnover
+      let resolvedBankTurnover: ClientBankTurnover[] = [];
       if (bankTurnoverRes.status === 'fulfilled' && Array.isArray(bankTurnoverRes.value.data) && bankTurnoverRes.value.data.length > 0) {
-        fetchedData.bank_turnover = bankTurnoverRes.value.data;
-      } else if (bankTurnoverStoreRes.status === 'fulfilled' && Array.isArray(bankTurnoverStoreRes.value?.data?.data) && bankTurnoverStoreRes.value.data.data.length > 0) {
-        fetchedData.bank_turnover = bankTurnoverStoreRes.value.data.data;
-      } else if (snapData && Array.isArray(snapData.bank_turnover) && snapData.bank_turnover.length > 0) {
-        fetchedData.bank_turnover = snapData.bank_turnover;
+        resolvedBankTurnover = (bankTurnoverRes.value.data as any[]).map((r) => ({
+          id: r.id,
+          client_id: r.client_id,
+          bank_account_id: r.bank_account_id,
+          financial_year_id: r.financial_year_id,
+          month: r.month,
+          turnover_amount: Number(r.turnover_amount) || 0,
+          created_at: r.updated_at || new Date().toISOString(),
+          updated_at: r.updated_at || new Date().toISOString(),
+        }));
       }
+      if (bankTurnoverStoreRes.status === 'fulfilled' && Array.isArray(bankTurnoverStoreRes.value?.data?.data) && bankTurnoverStoreRes.value.data.data.length > 0) {
+        const storeTurnovers: ClientBankTurnover[] = bankTurnoverStoreRes.value.data.data;
+        const map = new Map<string, ClientBankTurnover>();
+        resolvedBankTurnover.forEach((t) => map.set(`${t.client_id}_${t.bank_account_id}_${t.financial_year_id}_${t.month}`, t));
+        storeTurnovers.forEach((t) => map.set(`${t.client_id}_${t.bank_account_id}_${t.financial_year_id}_${t.month}`, t));
+        resolvedBankTurnover = Array.from(map.values());
+      } else if (resolvedBankTurnover.length === 0 && snapData && Array.isArray(snapData.bank_turnover)) {
+        resolvedBankTurnover = snapData.bank_turnover;
+      }
+      fetchedData.bank_turnover = resolvedBankTurnover;
 
       // 6. Bank Accounts
+      let resolvedBankAccounts: ClientBankAccount[] = [];
       if (bankAccountsRes.status === 'fulfilled' && Array.isArray(bankAccountsRes.value.data) && bankAccountsRes.value.data.length > 0) {
-        fetchedData.bank_accounts = bankAccountsRes.value.data;
-      } else if (bankAccountsStoreRes.status === 'fulfilled' && Array.isArray(bankAccountsStoreRes.value?.data?.data) && bankAccountsStoreRes.value.data.data.length > 0) {
-        fetchedData.bank_accounts = bankAccountsStoreRes.value.data.data;
-      } else if (snapData && Array.isArray(snapData.bank_accounts) && snapData.bank_accounts.length > 0) {
-        fetchedData.bank_accounts = snapData.bank_accounts;
+        resolvedBankAccounts = (bankAccountsRes.value.data as any[]).map((r) => {
+          let meta: any = {};
+          try {
+            if (r.notes && typeof r.notes === 'string') meta = JSON.parse(r.notes);
+          } catch {}
+          return {
+            id: r.id,
+            client_id: r.client_id,
+            slot_number: r.slot_number,
+            bank_name: r.bank_name || '',
+            account_number: r.account_number || '',
+            account_holder_name: meta.account_holder_name || '',
+            account_type: r.account_type || 'Current',
+            ifsc: r.ifsc_code || '',
+            status: meta.status || 'active',
+            current_fy_id: meta.current_fy_id,
+            deactivated_in_fy_id: meta.deactivated_in_fy_id,
+            deactivated_fy_start_year: meta.deactivated_fy_start_year,
+            deactivated_fy_name: meta.deactivated_fy_name,
+            created_at: r.created_at || r.updated_at,
+            updated_at: r.updated_at,
+          };
+        });
       }
+      if (bankAccountsStoreRes.status === 'fulfilled' && Array.isArray(bankAccountsStoreRes.value?.data?.data) && bankAccountsStoreRes.value.data.data.length > 0) {
+        const storeAccounts: ClientBankAccount[] = bankAccountsStoreRes.value.data.data;
+        const map = new Map<string, ClientBankAccount>();
+        resolvedBankAccounts.forEach((a) => map.set(`${a.client_id}_${a.slot_number}`, a));
+        storeAccounts.forEach((a) => map.set(`${a.client_id}_${a.slot_number}`, a));
+        resolvedBankAccounts = Array.from(map.values());
+      } else if (resolvedBankAccounts.length === 0 && snapData && Array.isArray(snapData.bank_accounts)) {
+        resolvedBankAccounts = snapData.bank_accounts;
+      }
+      fetchedData.bank_accounts = resolvedBankAccounts;
 
       // 7. Financial Years
       if (financialYearsRes.status === 'fulfilled' && Array.isArray(financialYearsRes.value.data) && financialYearsRes.value.data.length > 0) {

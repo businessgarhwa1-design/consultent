@@ -135,13 +135,13 @@ export default function App() {
             setFinancialYears(res.data.financial_years);
           }
           if (Array.isArray(res.data.bank_accounts) && res.data.bank_accounts.length > 0) {
-            GSTStorage.saveBankAccounts(res.data.bank_accounts);
+            GSTStorage.mergeBankAccountsFromCloud(res.data.bank_accounts);
           }
           if (Array.isArray(res.data.gst_turnover) && res.data.gst_turnover.length > 0) {
             GSTStorage.saveGstTurnoverLocally(res.data.gst_turnover);
           }
           if (Array.isArray(res.data.bank_turnover) && res.data.bank_turnover.length > 0) {
-            GSTStorage.saveBankTurnover(res.data.bank_turnover);
+            GSTStorage.mergeBankTurnoverFromCloud(res.data.bank_turnover);
           }
           if (Array.isArray(res.data.users) && res.data.users.length > 0) {
             const mergedUsers = GSTStorage.mergeUsersFromCloud(res.data.users);
@@ -650,13 +650,13 @@ export default function App() {
             GSTStorage.saveFinancialYears(remoteRes.data.financial_years);
           }
           if (Array.isArray(remoteRes.data.bank_accounts) && remoteRes.data.bank_accounts.length > 0) {
-            GSTStorage.saveBankAccounts(remoteRes.data.bank_accounts);
+            GSTStorage.mergeBankAccountsFromCloud(remoteRes.data.bank_accounts);
           }
           if (Array.isArray(remoteRes.data.gst_turnover) && remoteRes.data.gst_turnover.length > 0) {
-            GSTStorage.saveGstTurnover(remoteRes.data.gst_turnover);
+            GSTStorage.saveGstTurnoverLocally(remoteRes.data.gst_turnover);
           }
           if (Array.isArray(remoteRes.data.bank_turnover) && remoteRes.data.bank_turnover.length > 0) {
-            GSTStorage.saveBankTurnover(remoteRes.data.bank_turnover);
+            GSTStorage.mergeBankTurnoverFromCloud(remoteRes.data.bank_turnover);
           }
           if (Array.isArray(remoteRes.data.users) && remoteRes.data.users.length > 0) {
             GSTStorage.mergeUsersFromCloud(remoteRes.data.users);
